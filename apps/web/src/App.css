@@ -1,0 +1,138 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+  width: 100%;
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #333;
+  padding-bottom: 10px;
+}
+
+.status {
+  font-size: 0.8rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.status.connected { background: #1b5e20; color: white; }
+.status.disconnected { background: #b71c1c; color: white; }
+.status.connecting { background: #f57f17; color: white; }
+
+.main-content {
+  display: flex;
+  flex: 1;
+  gap: 20px;
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+
+.logs-panel {
+  flex: 1;
+  background: #111;
+  border-radius: 8px;
+  border: 1px solid #333;
+  padding: 10px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.85rem;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.log-entry {
+  padding: 4px 8px;
+  border-bottom: 1px solid #222;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.log-entry.debug { color: #aaa; }
+.log-entry .ts { color: #666; font-size: 0.7rem; margin-right: 8px; }
+
+.chat-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 5px;
+}
+
+.message {
+  max-width: 80%;
+  padding: 10px 15px;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #2196f3;
+  color: white;
+}
+
+.message.agent {
+  align-self: flex-start;
+  background: #424242;
+  color: white;
+}
+
+.message.system {
+  align-self: center;
+  background: transparent;
+  color: #888;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.meta {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  margin-top: 5px;
+  text-align: right;
+}
+
+.input-area {
+  display: flex;
+  gap: 10px;
+}
+
+.input-area input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #242424;
+  color: white;
+}
+
+button {
+  padding: 10px 20px;
+}
