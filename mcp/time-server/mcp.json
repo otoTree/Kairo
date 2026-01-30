@@ -1,0 +1,7 @@
+{
+  "name": "time-server",
+  "command": "bun",
+  "args": ["run", "mcp/time-server/index.ts"],
+  "description": "Provides current time information",
+  "keywords": ["time", "date", "clock", "timezone"]
+}
