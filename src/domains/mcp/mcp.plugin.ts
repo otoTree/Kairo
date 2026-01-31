@@ -3,7 +3,7 @@ import type { Application } from "../../core/app";
 import { MCPRegistry } from "./registry";
 import { FullMCPRouter, KeywordMCPRouter } from "./router";
 import type { MCPServerConfig, MCPRouter, MCPTool } from "./types";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 
 export class MCPPlugin implements Plugin {
   readonly name = "mcp";
@@ -88,7 +88,7 @@ export class MCPPlugin implements Plugin {
               arguments: args
           }
       },
-      CallToolRequestSchema
+      CallToolResultSchema
     );
 
     return result;

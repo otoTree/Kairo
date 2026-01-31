@@ -42,11 +42,26 @@ async function bootstrap() {
     await app.start();
 
     // Trigger initial event to wake up the agent
-    agent.bus.publish({
-      type: "system_event",
-      name: "startup",
-      payload: { message: "System initialized. Hello Agent!" },
-      ts: Date.now()
+    agent.globalBus.publish({
+      type: "kairo.system.event", // Standard system event
+      source: "system",
+      data: { 
+          type: "system_event", // Legacy payload for compatibility if needed, or just new structure
+          name: "startup",
+          payload: { message: "System initialized. Hello Agent!" }
+      }
+    });
+
+    // Also publish legacy for compat if runtime relies strictly on mapping
+    agent.globalBus.publish({
+        type: "kairo.legacy.system_event",
+        source: "system",
+        data: {
+            type: "system_event",
+            name: "startup",
+            payload: { message: "System initialized. Hello Agent!" },
+            ts: Date.now()
+        }
     });
     
     // Handle graceful shutdown

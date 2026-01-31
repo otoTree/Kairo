@@ -23,6 +23,7 @@
     "@vscode/ripgrep": "^1.17.0",
     "hono": "^4.11.7",
     "lodash-es": "^4.17.23",
+    "mitt": "^3.0.1",
     "shell-quote": "^1.8.3",
     "zod": "^4.3.6"
   }
