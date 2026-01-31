@@ -47,11 +47,17 @@ export class ServerPlugin implements Plugin {
             if (this.agent) {
                 try {
                     const data = JSON.parse(msg);
-                    if (data.type === 'user_message') {
-                        this.agent.bus.publish({
-                            type: 'user_message',
-                            text: data.text,
-                            ts: Date.now()
+                    
+                    if (data.type === 'user_message' || data.type === 'user_input') {
+                        // Standardize on user_message
+                        // We publish a standard KairoEvent
+                        this.agent.globalBus.publish({
+                            type: 'kairo.user.message',
+                            source: 'client:web', // or ws id
+                            data: { 
+                                content: data.text || data.content,
+                                targetAgentId: data.agentId
+                            }
                         });
                     }
                 } catch (e) {
@@ -81,25 +87,29 @@ export class ServerPlugin implements Plugin {
     try {
         this.agent = this.coreApp?.getService<AgentPlugin>("agent");
         if (this.agent) {
-            this.agent.onAction((action) => {
-                this.broadcast({
-                    type: 'agent_action',
-                    action
-                });
+            const bus = this.agent.globalBus;
+
+            // Subscribe to standard Kairo events
+            bus.subscribe("kairo.agent.thought", (event) => {
+                this.broadcast(event);
             });
-            this.agent.onLog((log) => {
-                this.broadcast({
-                    type: 'agent_log',
-                    log
-                });
+            
+            bus.subscribe("kairo.agent.action", (event) => {
+                this.broadcast(event);
             });
-            this.agent.onActionResult((result) => {
-                this.broadcast({
-                    type: 'agent_action_result',
-                    result
-                });
+
+            bus.subscribe("kairo.tool.result", (event) => {
+                this.broadcast(event);
             });
-            console.log("[Server] Connected to AgentPlugin");
+            
+            bus.subscribe("kairo.system.log", (event) => {
+                 this.broadcast(event);
+            });
+            
+            // Also subscribe to legacy output for compatibility if Runtime emits them?
+            // Runtime emits kairo.agent.thought, etc.
+            
+            console.log("[Server] Connected to AgentPlugin (Event Bus)");
         }
     } catch (e) {
         console.warn("[Server] AgentPlugin not found, running in standalone mode");

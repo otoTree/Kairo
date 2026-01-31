@@ -1,68 +1,115 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Inter:wght@100..900&display=swap');
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
-  cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
+@layer base {
   :root {
-    color: #213547;
-    background-color: #ffffff;
+    /* Colors - OKLCH */
+    /* Base: pure white bg + pure black text */
+    --background: 1 0 0; /* oklch(1 0 0) - defined as channels for opacity support in Tailwind 3 if using <alpha-value> syntax, but here we use simple var replacement */
+    /* Actually, for Tailwind 3 with opacity support, we need: 
+       config: color: "oklch(var(--color) / <alpha-value>)"
+       css: --color: L C H;
+       But my config is just "var(--color)". So opacity won't work.
+       I will stick to full color definitions for simplicity and robustness.
+    */
+    --background: oklch(1 0 0);
+    --foreground: oklch(0 0 0);
+
+    /* Section BG */
+    --section: oklch(0.985 0 0);
+
+    /* Card/Popover */
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0 0 0);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0 0 0);
+
+    /* Primary - Black */
+    --primary: oklch(0 0 0);
+    --primary-foreground: oklch(1 0 0);
+
+    /* Secondary - Light Gray */
+    --secondary: oklch(0.96 0 0);
+    --secondary-foreground: oklch(0 0 0);
+
+    /* Muted */
+    --muted: oklch(0.96 0 0);
+    --muted-foreground: oklch(0 0 0 / 0.5);
+
+    /* Accent */
+    --accent: oklch(0.96 0 0);
+    --accent-foreground: oklch(0 0 0);
+
+    /* Destructive */
+    --destructive: oklch(0.577 0.245 27.325);
+    --destructive-foreground: oklch(1 0 0);
+
+    /* Borders & Input */
+    --border: oklch(0 0 0 / 0.08);
+    --input: oklch(0 0 0 / 0.08);
+    --ring: oklch(0 0 0 / 0.1);
+
+    /* Radius */
+    --radius: 0.5rem;
+
+    /* Mode Colors */
+    --color-auto: oklch(0.55 0.01 60);
+    --color-fortune: oklch(0.7 0.1 290);
+    --color-listen: oklch(0.75 0.08 165);
+    --color-divination: oklch(0.7 0.1 290);
   }
-  a:hover {
-    color: #747bff;
+
+  * {
+    @apply border-border;
   }
-  button {
-    background-color: #f9f9f9;
+  
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    cursor: default;
   }
+
+  /* Typography */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-serif font-light tracking-tight;
+  }
+
+  /* Cursors */
+  button, a, [role="button"] {
+    cursor: pointer;
+  }
+  
+  input, textarea, [contenteditable="true"] {
+    cursor: text;
+  }
+  
+  :disabled, [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
+/* Glassmorphism */
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: oklch(0 0 0 / 0.1);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: oklch(0 0 0 / 0.2);
 }

@@ -1,39 +1,53 @@
 import type { AIPlugin } from "../ai/ai.plugin";
 import type { MCPPlugin } from "../mcp/mcp.plugin";
-import type { ObservationBus } from "./observation-bus";
+import type { Observation } from "./observation-bus"; // Still need type for memory compat
 import type { AgentMemory } from "./memory";
+import type { SharedMemory } from "./shared-memory";
+import type { EventBus, KairoEvent } from "../events";
 
 export interface AgentRuntimeOptions {
+  id?: string;
   ai: AIPlugin;
   mcp?: MCPPlugin;
-  bus: ObservationBus;
+  bus: EventBus;
   memory: AgentMemory;
+  sharedMemory?: SharedMemory;
   onAction?: (action: any) => void;
   onLog?: (log: any) => void;
   onActionResult?: (result: any) => void;
 }
 
 export class AgentRuntime {
+  public readonly id: string;
   private ai: AIPlugin;
   private mcp?: MCPPlugin;
-  private bus: ObservationBus;
+  private bus: EventBus;
   private memory: AgentMemory;
+  private sharedMemory?: SharedMemory;
   private onAction?: (action: any) => void;
   private onLog?: (log: any) => void;
   private onActionResult?: (result: any) => void;
   private tickCount: number = 0;
   private running: boolean = false;
-  private unsubscribeBus?: () => void;
+  private unsubscribe?: () => void;
   
   private isTicking: boolean = false;
   private hasPendingUpdate: boolean = false;
   private tickHistory: number[] = [];
+  
+  // Track pending actions for result correlation
+  private pendingActions: Set<string> = new Set();
+  
+  // Internal event buffer to replace legacy adapter
+  private eventBuffer: KairoEvent[] = [];
 
   constructor(options: AgentRuntimeOptions) {
+    this.id = options.id || crypto.randomUUID();
     this.ai = options.ai;
     this.mcp = options.mcp;
     this.bus = options.bus;
     this.memory = options.memory;
+    this.sharedMemory = options.sharedMemory;
     this.onAction = options.onAction;
     this.onLog = options.onLog;
     this.onActionResult = options.onActionResult;
@@ -65,22 +79,68 @@ export class AgentRuntime {
     this.tickHistory = [];
     this.log(`Starting event-driven agent loop...`);
     
-    // Subscribe to bus events
-    this.unsubscribeBus = this.bus.subscribe(() => {
-      this.onObservation();
-    });
+    // Subscribe to standard Kairo events
+    // We listen to user messages and tool results (and legacy events for compat)
+    // Note: 'kairo.legacy.*' includes 'user_message', 'system_event', etc.
+    // 'kairo.tool.result' is the new standard
+    // 'kairo.agent.action' is emitted by us, so we ignore it (or use it for history?)
+    // For now, we subscribe to everything relevant and filter in the handler
+    
+    const unsubs: (() => void)[] = [];
+    
+    // Subscribe to legacy events (compatibility)
+    // We moved legacy handling to AgentPlugin (Orchestrator) to prevent broadcast storm
+    // unsubs.push(this.bus.subscribe("kairo.legacy.*", this.handleEvent.bind(this)));
+    
+    // Subscribe to tool results (standard)
+    unsubs.push(this.bus.subscribe("kairo.tool.result", this.handleEvent.bind(this)));
 
-    // Initial check in case there are already observations
-    this.onObservation();
+    // Subscribe to direct agent messages (Router handles user.message -> agent.ID.message)
+    unsubs.push(this.bus.subscribe(`kairo.agent.${this.id}.message`, this.handleEvent.bind(this)));
+
+    this.unsubscribe = () => {
+      unsubs.forEach(u => u());
+    };
+
+    // Initial check (if any events were persisted/replayed?)
+    // Usually we wait for events.
   }
 
   stop() {
     this.running = false;
-    if (this.unsubscribeBus) {
-      this.unsubscribeBus();
-      this.unsubscribeBus = undefined;
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = undefined;
     }
     this.log("Stopped.");
+  }
+
+  private handleEvent(event: KairoEvent) {
+    if (!this.running) return;
+    
+    // Filter out our own emissions if necessary to avoid loops
+    // (though 'tool.result' comes from tools, and 'legacy' comes from outside usually)
+
+    // Filter tool results: Only accept if we caused it
+    if (event.type === "kairo.tool.result") {
+        if (!event.causationId || !this.pendingActions.has(event.causationId)) {
+            // Not for us
+            return;
+        }
+        // It is for us, consume it and remove from pending
+        this.pendingActions.delete(event.causationId);
+    }
+
+    // Filter user messages if targeted
+    if (event.type === "kairo.user.message") {
+        const target = (event.data as any).targetAgentId;
+        if (target && target !== this.id) {
+            return;
+        }
+    }
+    
+    this.eventBuffer.push(event);
+    this.onObservation();
   }
 
   private onObservation() {
@@ -98,26 +158,40 @@ export class AgentRuntime {
     if (!this.running || this.isTicking) return;
 
     this.isTicking = true;
-    this.hasPendingUpdate = false; // Consuming the event
+    this.hasPendingUpdate = false; 
 
     try {
-      await this.tick();
+      // Drain buffer immediately to capture current state
+      const eventsToProcess = [...this.eventBuffer];
+      this.eventBuffer = [];
+      
+      if (eventsToProcess.length > 0) {
+        await this.tick(eventsToProcess);
+      }
     } catch (error) {
       console.error("[AgentRuntime] Tick error:", error);
     } finally {
       this.isTicking = false;
-      // If new observations arrived while we were ticking, run again
+      // If new events arrived while we were ticking, run again
       if (this.hasPendingUpdate && this.running) {
+        // Simple debounce/next-tick
         setTimeout(() => this.processTick(), 0);
       }
     }
   }
 
-  private async tick() {
+  private async tick(events: KairoEvent[]) {
     this.tickCount++;
     this.tickHistory.push(Date.now());
     
-    const { observations, ts } = this.bus.snapshot();
+    // Convert events to Observations for internal logic/memory
+    // This is the "Adapter" logic moved inside
+    const observations: Observation[] = events.map(e => this.mapEventToObservation(e)).filter((o): o is Observation => o !== null);
+    
+    if (observations.length === 0) {
+        return; // Nothing actionable
+    }
+
     let context = this.memory.getContext();
 
     // Check compression trigger (80% of ~40k tokens)
@@ -132,8 +206,6 @@ export class AgentRuntime {
     // MCP Routing
     let toolsContext = "";
     if (this.mcp) {
-        // Use observations and context to find relevant tools
-        // For MVP, we use the last observation content or context summary
         const lastObservation = observations.length > 0 ? JSON.stringify(observations[observations.length - 1]) : context.slice(-500);
         try {
             const tools = await this.mcp.getRelevantTools(lastObservation);
@@ -146,7 +218,7 @@ export class AgentRuntime {
     }
 
     // Construct Prompt
-    const systemPrompt = this.getSystemPrompt(context, toolsContext);
+    const systemPrompt = await this.getSystemPrompt(context, toolsContext);
     const userPrompt = this.composeUserPrompt(observations);
     
     this.log(`Tick #${this.tickCount} processing...`);
@@ -169,226 +241,231 @@ export class AgentRuntime {
       this.log(`Thought: ${thought}`);
       this.log(`Action:`, action);
 
-      let actionResult = null;
-      if (action.type === 'tool_call' && this.mcp) {
-          try {
-             actionResult = await this.dispatchToolCall(action);
-             if (this.onActionResult) {
-                 this.onActionResult({
-                     action,
-                     result: actionResult
-                 });
-             }
-             // Publish action result to observation bus so it becomes part of the next tick's context
-             this.bus.publish({
-                 type: "action_result",
-                 action: action,
-                 result: actionResult,
-                 ts: Date.now()
-             });
-          } catch (e: any) {
-             actionResult = `Tool call failed: ${e.message}`;
-             // Also publish failure
-             this.bus.publish({
-                 type: "action_result",
-                 action: action,
-                 result: actionResult,
-                 ts: Date.now()
-             });
-          }
-      } else {
-          this.dispatchAction(action);
-      }
-
-      this.memory.update({
-        observation: JSON.stringify(observations), // Simplified for MVP
-        thought,
-        action: JSON.stringify(action),
-        actionResult: actionResult ? JSON.stringify(actionResult) : undefined
+      // Publish Thought Event
+      this.bus.publish({
+          type: "kairo.agent.thought",
+          source: "agent:" + this.id,
+          data: { thought }
       });
 
-    } catch (e) {
-      console.error("[AgentRuntime] LLM call failed:", e);
-      this.log(`LLM call failed`, e);
+      let actionResult = null;
+      let actionEventId: string | undefined;
+
+      if (action.type === 'say' || action.type === 'query') {
+          // Publish Action Event
+          actionEventId = await this.bus.publish({
+              type: "kairo.agent.action",
+              source: "agent:" + this.id,
+              data: { action }
+          });
+          actionResult = "Displayed to user";
+      } else if (action.type === 'tool_call' && this.mcp) {
+          // Validate action structure
+          if (!action.function || !action.function.name) {
+              const errorMsg = "Invalid tool_call action: missing function name";
+              console.error("[AgentRuntime]", errorMsg, action);
+              
+              // We need to feed this error back to the agent so it can correct itself
+              // instead of crashing or getting stuck.
+              // We simulate a result event with error.
+              this.bus.publish({
+                 type: "kairo.tool.result",
+                 source: "system", // System error
+                 data: { error: errorMsg },
+                 causationId: actionEventId
+              });
+              
+              // Skip execution
+          } else {
+              // Publish Action Event
+              actionEventId = await this.bus.publish({
+                  type: "kairo.agent.action",
+                  source: "agent:" + this.id,
+                  data: { action }
+              });
+              
+              this.pendingActions.add(actionEventId);
+
+              try {
+                 actionResult = await this.dispatchToolCall(action);
+                 if (this.onActionResult) {
+                     this.onActionResult({
+                         action,
+                         result: actionResult
+                     });
+                 }
+                 
+                 // Publish standardized result event
+                 this.bus.publish({
+                     type: "kairo.tool.result",
+                     source: "tool:" + action.function.name,
+                     data: { result: actionResult },
+                     causationId: actionEventId
+                 });
+
+              } catch (e: any) {
+                 actionResult = `Tool call failed: ${e.message}`;
+
+                 this.bus.publish({
+                     type: "kairo.tool.result",
+                     source: "tool:" + action.function.name,
+                     data: { error: e.message },
+                     causationId: actionEventId
+                 });
+              }
+          }
+      } else {
+        // No-op or unknown action
+      }
+
+      // Update Memory
+      // For tool calls, we defer result to the event loop (observed as action_result)
+      this.memory.update({
+        observation: JSON.stringify(observations), 
+        thought,
+        action: JSON.stringify(action),
+        actionResult: action.type === 'tool_call' ? undefined : (actionResult ? (typeof actionResult === 'string' ? actionResult : JSON.stringify(actionResult)) : undefined)
+      });
+
+    } catch (error) {
+      console.error("[AgentRuntime] Error in tick:", error);
     }
   }
 
-  private getSystemPrompt(context: string, toolsContext: string) {
-    const now = new Date();
-    const timeStr = now.toLocaleString('zh-CN', { 
-        year: 'numeric', 
-        month: '2-digit', 
-        day: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit',
-        hour12: false,
-        timeZoneName: 'short' 
-    });
+  private mapEventToObservation(event: KairoEvent): Observation | null {
+    // 1. Legacy events
+    if (event.type.startsWith("kairo.legacy.")) {
+      return event.data as Observation;
+    }
 
-    return `你是一个持续运行的 Agent。你的任务是根据观测到的信息和记忆，决定下一步的行动。
-当前系统时间: ${timeStr}
+    // 2. Standard User Message (or targeted)
+    if (event.type === "kairo.user.message" || event.type === `kairo.agent.${this.id}.message`) {
+        return {
+            type: "user_message",
+            text: (event.data as any).content,
+            ts: new Date(event.time).getTime()
+        };
+    }
+    
+    // 3. Standard Tool Results
+    if (event.type === "kairo.tool.result") {
+      // Need to reconstruct context? 
+      // The memory expects "action_result".
+      // We might need to map it back to what Memory expects.
+      return {
+        type: "action_result",
+        action: { type: "tool_call", function: { name: event.source.replace("tool:", "") } }, // Approximate
+        result: (event.data as any).result || (event.data as any).error,
+        ts: new Date(event.time).getTime()
+      };
+    }
 
-<memory>
-${context}
-</memory>
-
-${toolsContext ? `<tools>\n${toolsContext}\n</tools>` : ''}
-
-输出格式说明：
-请先在 <thought> 标签中进行思考，分析当前状态、信息缺口和下一步计划。
-然后在 <action> 标签中输出 JSON 格式的行动指令。
-
-Action JSON 格式说明：
-1. 闲聊/回复 (say) 或 提问 (query) 或 无操作 (noop):
-   payload 为字符串。
-2. 工具调用 (tool_call):
-   payload 必须为对象，包含 name 和 args。
-
-Examples:
-
-<thought>
-用户打招呼，我应该回复。
-</thought>
-<action>
-{ "type": "say", "payload": "你好！有什么我可以帮你的吗？" }
-</action>
-
-<thought>
-需要查询当前时间。
-</thought>
-<action>
-{ "type": "tool_call", "payload": { "name": "get_current_time", "args": { "timezone": "Asia/Shanghai" } } }
-</action>
-
-规则：
-1) 如果需要获取客观信息（如时间、文件、搜索等），必须输出 tool_call。
-2) 如果需要向用户提问或确认意图，输出 query，payload 为自然语言问题。
-3) 如果已有结果或需要闲聊，输出 say，payload 为自然语言回复。
-4) 如果没有新信息且无需行动，输出 noop。
-5) JSON 必须包含在 <action> 标签内，严禁使用 Markdown 代码块 (如 \`\`\`json ... \`\`\`)。`;
+    return null;
   }
+  
+  // Helper methods (getSystemPrompt, composeUserPrompt, parseResponse, dispatchToolCall)
+  
+  private async getSystemPrompt(context: string, toolsContext: string): Promise<string> {
+      let facts = "";
+      if (this.sharedMemory) {
+          const allFacts = await this.sharedMemory.getFacts();
+          if (allFacts.length > 0) {
+              facts = `\n【Shared Knowledge】\n${allFacts.map(f => `- ${f}`).join('\n')}`;
+          }
+      }
 
-  private composeUserPrompt(observations: any[]) {
-    return `当前 tick: t=${this.tickCount}, hz=${this.hz}
+      return `You are Kairo (Agent ${this.id}), an autonomous AI agent running on the user's local machine.
+Your goal is to assist the user with their tasks efficiently and safely.
 
-<observations>
-${observations.length > 0 ? JSON.stringify(observations, null, 2) : "无新观测"}
-</observations>
+【Environment】
+- OS: ${process.platform}
+- CWD: ${process.cwd()}
+- Date: ${new Date().toISOString()}
+
+【Capabilities】
+- You can execute shell commands.
+- You can read/write files.
+- You can use provided tools.
+
+【Memory & Context】
+${context}
+${toolsContext}
+${facts}
+
+【Response Format】
+You must respond with a JSON object strictly. Do not include markdown code blocks (like \`\`\`json).
+Format:
+{
+  "thought": "Your reasoning process here...",
+  "action": {
+    "type": "tool_call",
+    "function": {
+      "name": "tool_name",
+      "arguments": { ... }
+    }
+  }
+}
+
+To speak to the user:
+{
+  "thought": "reasoning...",
+  "action": { "type": "say", "content": "message to user" }
+}
+
+To ask the user a question:
+{
+  "thought": "reasoning...",
+  "action": { "type": "query", "content": "question to user" }
+}
+
+Or if no action is needed (waiting for user):
+{
+  "thought": "...",
+  "action": { "type": "noop" }
+}
 `;
   }
 
-  private parseResponse(raw: string): { thought: string; action: any } {
+  private composeUserPrompt(observations: Observation[]): string {
+    if (observations.length === 0) return "No new observations.";
+    
+    return observations.map(obs => {
+      if (obs.type === 'user_message') return `User: ${obs.text}`;
+      if (obs.type === 'system_event') return `System Event: ${obs.name} ${JSON.stringify(obs.payload)}`;
+      if (obs.type === 'action_result') return `Action Result: ${JSON.stringify(obs.result)}`;
+      return JSON.stringify(obs);
+    }).join("\n");
+  }
+
+  private parseResponse(content: string): { thought: string; action: any } {
     try {
-      // Extract thought
-      const thoughtMatch = raw.match(/<thought>([\s\S]*?)<\/thought>/);
-      const thought = (thoughtMatch && thoughtMatch[1]) ? thoughtMatch[1].trim() : "No thought provided";
-
-      // Extract action
-      const actionMatch = raw.match(/<action>([\s\S]*?)<\/action>/);
-      let actionJson = (actionMatch && actionMatch[1]) ? actionMatch[1].trim() : raw; // Fallback to raw if no tags
-
-      // Clean up markdown code blocks if present
-      actionJson = actionJson.replace(/```json\n?|\n?```/g, "").trim();
-      
-      // Try to parse JSON
-      let parsed;
-      try {
-          parsed = JSON.parse(actionJson);
-      } catch (e) {
-          // Fallback: try to find JSON object in the string if direct parse fails
-          const jsonMatch = actionJson.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-              try {
-                parsed = JSON.parse(jsonMatch[0]);
-              } catch (innerE) {
-                // Ignore inner error, will try XML fallback
-              }
-          }
-      }
-
-      // Fallback for XML-style tags if JSON parsing fails (compatibility mode)
-      if (!parsed) {
-          const sayMatch = raw.match(/<say>([\s\S]*?)<\/say>/);
-          if (sayMatch && sayMatch[1] !== undefined) {
-              parsed = { type: 'say', payload: sayMatch[1].trim() };
-          } else {
-              const queryMatch = raw.match(/<query>([\s\S]*?)<\/query>/);
-              if (queryMatch && queryMatch[1] !== undefined) {
-                  parsed = { type: 'query', payload: queryMatch[1].trim() };
-              }
-          }
-      }
-      
-      // Final Fallback: Treat the remaining content as a "say" action (Lenient Extraction)
-      if (!parsed) {
-          let contentToSay = raw;
-          // Remove <thought> block from raw content to avoid repeating internal monologue
-          if (thoughtMatch) {
-              contentToSay = contentToSay.replace(thoughtMatch[0], "").trim();
-          }
-          
-          // Remove <action> tags if they exist but failed to parse (rare case)
-          if (actionMatch) {
-             contentToSay = contentToSay.replace(actionMatch[0], "").trim();
-          }
-
-          // Clean up markdown code blocks wrappers
-          contentToSay = contentToSay.replace(/^```\w*\n?/, "").replace(/\n?```$/, "").trim();
-
-          if (contentToSay.length > 0) {
-             parsed = { type: 'say', payload: contentToSay };
-          } else {
-             // If nothing left, it's a noop
-             parsed = { type: 'noop', payload: "No actionable content" };
-          }
-      }
-      
-      if (typeof parsed !== 'object') {
-         // Should not happen with above logic, but safety first
-         parsed = { type: 'say', payload: String(parsed) };
-      }
-
+      // Try to find JSON object in the content (in case LLM adds extra text)
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : content;
+      const parsed = JSON.parse(jsonStr);
       return {
-        thought: thought,
-        action: parsed.action || parsed // Handle both { action: { ... } } and { type: ... } formats
+        thought: parsed.thought || "No thought provided",
+        action: parsed.action || { type: "noop" }
       };
     } catch (e) {
-      console.warn("[AgentRuntime] Failed to parse response:", raw);
+      console.error("Failed to parse response:", content);
       return {
         thought: "Failed to parse response",
-        action: { type: "noop", payload: "Parse error" }
+        action: { type: "noop" }
       };
     }
   }
 
-  private dispatchAction(action: any) {
-    if (!action) return;
+  private async dispatchToolCall(action: any): Promise<any> {
+    if (!this.mcp) throw new Error("MCP not enabled");
     
-    // Notify listener
+    const { name, arguments: args } = action.function;
+    this.log(`Executing tool: ${name}`, args);
+    
     if (this.onAction) {
-      try {
         this.onAction(action);
-      } catch (e) {
-        console.error("[AgentRuntime] Error in onAction listener:", e);
-      }
     }
     
-    if (action.type === 'say') {
-        console.log(`[AGENT SAYS]:`, action.payload);
-    } else if (action.type === 'query') {
-        console.log(`[AGENT QUERIES]:`, action.payload);
-    }
-  }
-
-  private async dispatchToolCall(action: any) {
-      if (!this.mcp) return "MCP not available";
-      const payload = action.payload;
-      if (!payload || !payload.name) return "Invalid tool payload";
-      
-      console.log(`[AgentRuntime] Executing tool ${payload.name}...`);
-      const result = await this.mcp.callTool(payload.name, payload.args || {});
-      console.log(`[AgentRuntime] Tool result:`, result);
-      return result;
+    return await this.mcp.callTool(name, args);
   }
 }
