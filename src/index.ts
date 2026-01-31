@@ -8,6 +8,7 @@ import { ServerPlugin } from "./domains/server/server.plugin";
 import { SandboxPlugin } from "./domains/sandbox/sandbox.plugin";
 import { MCPPlugin } from "./domains/mcp/mcp.plugin";
 import { scanLocalMcpServers } from "./domains/mcp/utils/loader";
+import { SkillsPlugin } from "./domains/skills/skills.plugin";
 
 const app = new Application();
 
@@ -34,6 +35,9 @@ async function bootstrap() {
     // Setup Agent
     const agent = new AgentPlugin();
     await app.use(agent);
+
+    // Setup Skills
+    await app.use(new SkillsPlugin());
 
     // Setup Server
     const server = new ServerPlugin(3000);

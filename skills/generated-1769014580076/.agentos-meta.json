@@ -1,0 +1,154 @@
+{
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "urls": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uri"
+        },
+        "description": "List of URLs to collect content from"
+      },
+      "jina_api_key": {
+        "type": "string",
+        "description": "Jina AI API key for authentication"
+      },
+      "extract_mode": {
+        "type": "string",
+        "enum": [
+          "text",
+          "html",
+          "markdown",
+          "all"
+        ],
+        "default": "text",
+        "description": "Content extraction mode"
+      },
+      "max_pages": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 10,
+        "description": "Maximum number of pages to process"
+      },
+      "timeout": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 60,
+        "default": 30,
+        "description": "Request timeout in seconds"
+      },
+      "include_metadata": {
+        "type": "boolean",
+        "default": true,
+        "description": "Include metadata in results"
+      }
+    },
+    "required": [
+      "urls",
+      "jina_api_key"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {
+        "type": "boolean",
+        "description": "Overall operation success status"
+      },
+      "collected_pages": {
+        "type": "integer",
+        "description": "Number of successfully collected pages"
+      },
+      "failed_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "URLs that failed to process"
+      },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "extracted_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "content_type": {
+              "type": "string"
+            },
+            "word_count": {
+              "type": "integer"
+            },
+            "metadata": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "url",
+            "content",
+            "extracted_at"
+          ]
+        },
+        "description": "Collected content from web pages"
+      },
+      "summary": {
+        "type": "object",
+        "properties": {
+          "total_urls": {
+            "type": "integer"
+          },
+          "success_rate": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "total_words": {
+            "type": "integer"
+          },
+          "processing_time": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total_urls",
+          "success_rate",
+          "processing_time"
+        ]
+      }
+    },
+    "required": [
+      "success",
+      "collected_pages",
+      "results",
+      "summary"
+    ],
+    "additionalProperties": false
+  },
+  "entrypoint": "src/main.py",
+  "name": "jina_web_collector",
+  "description": "Collect and extract content from web pages using Jina AI's APIs",
+  "files": [
+    "src/main.py",
+    "src/jina_client.py",
+    "src/web_utils.py",
+    "src/content_processor.py",
+    "SKILL.md",
+    "assets/default_config.json",
+    "references/api_documentation.md"
+  ]
+}

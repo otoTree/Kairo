@@ -1,0 +1,95 @@
+{
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "jina_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of Jina page URLs to summarize"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "markdown",
+          "html",
+          "plain_text"
+        ],
+        "default": "markdown",
+        "description": "Format of the output document"
+      },
+      "summary_length": {
+        "type": "string",
+        "enum": [
+          "short",
+          "medium",
+          "detailed"
+        ],
+        "default": "medium",
+        "description": "Length of individual page summaries"
+      },
+      "include_metadata": {
+        "type": "boolean",
+        "default": true,
+        "description": "Include page metadata (URL, timestamp, etc.) in output"
+      },
+      "custom_template": {
+        "type": "string",
+        "default": "",
+        "description": "Path to custom template file (relative to assets/)"
+      }
+    },
+    "required": [
+      "jina_urls"
+    ],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {
+        "type": "boolean",
+        "description": "Whether the operation completed successfully"
+      },
+      "document_content": {
+        "type": "string",
+        "description": "The generated consolidated document content"
+      },
+      "summary_count": {
+        "type": "integer",
+        "description": "Number of pages successfully summarized"
+      },
+      "failed_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "URLs that failed to process"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Path where the document was saved (if applicable)"
+      }
+    },
+    "required": [
+      "success",
+      "document_content",
+      "summary_count",
+      "failed_urls"
+    ],
+    "additionalProperties": false
+  },
+  "entrypoint": "src/main.py",
+  "name": "jina_multi_page_summarizer",
+  "description": "Summarize and consolidate content from multiple Jina pages into a structured document",
+  "files": [
+    "src/main.py",
+    "src/jina_client.py",
+    "src/summarizer.py",
+    "src/document_generator.py",
+    "SKILL.md",
+    "assets/default_template.md",
+    "references/usage_guide.md"
+  ]
+}
