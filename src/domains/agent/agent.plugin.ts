@@ -5,7 +5,7 @@ import type { MCPPlugin } from "../mcp/mcp.plugin";
 import { LegacyObservationBusAdapter, type ObservationBus } from "./observation-bus";
 import { InMemoryAgentMemory, type AgentMemory } from "./memory";
 import { InMemorySharedMemory, type SharedMemory } from "./shared-memory";
-import { AgentRuntime } from "./runtime";
+import { AgentRuntime, type SystemTool } from "./runtime";
 import { InMemoryGlobalBus, RingBufferEventStore, type EventBus, type KairoEvent } from "../events";
 
 export class AgentPlugin implements Plugin {
@@ -26,12 +26,17 @@ export class AgentPlugin implements Plugin {
   
   private ai?: AIPlugin;
   private mcp?: MCPPlugin;
+  private systemTools: SystemTool[] = [];
 
   constructor() {
     this.globalBus = new InMemoryGlobalBus(new RingBufferEventStore());
     this.bus = new LegacyObservationBusAdapter(this.globalBus);
     this.memory = new InMemoryAgentMemory();
     this.sharedMemory = new InMemorySharedMemory();
+  }
+
+  registerSystemTool(definition: any, handler: (args: any, context: any) => Promise<any>) {
+    this.systemTools.push({ definition, handler });
   }
 
   onAction(listener: (action: any) => void) {
@@ -53,6 +58,10 @@ export class AgentPlugin implements Plugin {
     return () => {
       this.actionResultListeners = this.actionResultListeners.filter(l => l !== listener);
     };
+  }
+
+  public getAgent(id: string): AgentRuntime | undefined {
+    return this.agents.get(id);
   }
 
   setup(app: Application) {
@@ -141,7 +150,8 @@ export class AgentPlugin implements Plugin {
           sharedMemory: this.sharedMemory,
           onAction: (a) => this.actionListeners.forEach(l => l(a)),
           onLog: (l) => this.logListeners.forEach(l => l(l)),
-          onActionResult: (r) => this.actionResultListeners.forEach(l => l(r))
+          onActionResult: (r) => this.actionResultListeners.forEach(l => l(r)),
+          systemTools: this.systemTools
       });
       
       this.agents.set(id, runtime);

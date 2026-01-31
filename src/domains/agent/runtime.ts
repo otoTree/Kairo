@@ -4,6 +4,16 @@ import type { Observation } from "./observation-bus"; // Still need type for mem
 import type { AgentMemory } from "./memory";
 import type { SharedMemory } from "./shared-memory";
 import type { EventBus, KairoEvent } from "../events";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+
+export interface SystemToolContext {
+  agentId: string;
+}
+
+export interface SystemTool {
+  definition: Tool;
+  handler: (args: any, context: SystemToolContext) => Promise<any>;
+}
 
 export interface AgentRuntimeOptions {
   id?: string;
@@ -15,6 +25,7 @@ export interface AgentRuntimeOptions {
   onAction?: (action: any) => void;
   onLog?: (log: any) => void;
   onActionResult?: (result: any) => void;
+  systemTools?: SystemTool[];
 }
 
 export class AgentRuntime {
@@ -41,6 +52,8 @@ export class AgentRuntime {
   // Internal event buffer to replace legacy adapter
   private eventBuffer: KairoEvent[] = [];
 
+  private systemTools: Map<string, SystemTool> = new Map();
+
   constructor(options: AgentRuntimeOptions) {
     this.id = options.id || crypto.randomUUID();
     this.ai = options.ai;
@@ -51,6 +64,14 @@ export class AgentRuntime {
     this.onAction = options.onAction;
     this.onLog = options.onLog;
     this.onActionResult = options.onActionResult;
+
+    if (options.systemTools) {
+      options.systemTools.forEach(t => this.systemTools.set(t.definition.name, t));
+    }
+  }
+
+  public addSystemTool(tool: SystemTool) {
+    this.systemTools.set(tool.definition.name, tool);
   }
 
   private get hz(): number {
@@ -205,16 +226,27 @@ export class AgentRuntime {
 
     // MCP Routing
     let toolsContext = "";
+    const availableTools: Tool[] = [];
+
+    // Add System Tools
+    if (this.systemTools.size > 0) {
+        availableTools.push(...Array.from(this.systemTools.values()).map(t => t.definition));
+    }
+
     if (this.mcp) {
         const lastObservation = observations.length > 0 ? JSON.stringify(observations[observations.length - 1]) : context.slice(-500);
         try {
-            const tools = await this.mcp.getRelevantTools(lastObservation);
-            if (tools.length > 0) {
-                toolsContext = `\n可用工具 (Available Tools):\n${JSON.stringify(tools.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), null, 2)}`;
+            const mcpTools = await this.mcp.getRelevantTools(lastObservation);
+            if (mcpTools.length > 0) {
+                availableTools.push(...mcpTools);
             }
         } catch (e) {
             console.warn("[AgentRuntime] Failed to route tools:", e);
         }
+    }
+
+    if (availableTools.length > 0) {
+        toolsContext = `\n可用工具 (Available Tools):\n${JSON.stringify(availableTools.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), null, 2)}`;
     }
 
     // Construct Prompt
@@ -387,6 +419,12 @@ Your goal is to assist the user with their tasks efficiently and safely.
 - You can read/write files.
 - You can use provided tools.
 
+【Language Policy】
+You MUST respond in the same language as the user's input.
+- If the user speaks Chinese, you speak Chinese.
+- If the user speaks English, you speak English.
+- This applies specifically to the 'content' field in 'say' and 'query' actions.
+
 【Memory & Context】
 ${context}
 ${toolsContext}
@@ -457,14 +495,23 @@ Or if no action is needed (waiting for user):
   }
 
   private async dispatchToolCall(action: any): Promise<any> {
-    if (!this.mcp) throw new Error("MCP not enabled");
-    
     const { name, arguments: args } = action.function;
     this.log(`Executing tool: ${name}`, args);
     
     if (this.onAction) {
         this.onAction(action);
     }
+
+    // Check System Tools first
+    if (this.systemTools.has(name)) {
+        try {
+            return await this.systemTools.get(name)!.handler(args, { agentId: this.id });
+        } catch (e: any) {
+             throw new Error(`System tool execution failed: ${e.message}`);
+        }
+    }
+
+    if (!this.mcp) throw new Error("MCP not enabled and tool not found in system tools");
     
     return await this.mcp.callTool(name, args);
   }

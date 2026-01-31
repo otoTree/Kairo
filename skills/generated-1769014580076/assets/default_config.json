@@ -1,0 +1,196 @@
+json
+{
+    "name": "jina_web_collector",
+    "version": "1.0.0",
+    "description": "A web content collector using Jina AI for intelligent web scraping and content extraction",
+    "author": "Jina AI",
+    "license": "Apache-2.0",
+    
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "urls": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "format": "uri"
+                },
+                "description": "List of URLs to collect content from",
+                "minItems": 1,
+                "maxItems": 10
+            },
+            "extract_mode": {
+                "type": "string",
+                "enum": ["full_text", "summary", "key_points", "metadata_only"],
+                "default": "full_text",
+                "description": "Content extraction mode"
+            },
+            "include_images": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether to extract and include images from the web pages"
+            },
+            "timeout": {
+                "type": "integer",
+                "default": 30,
+                "minimum": 5,
+                "maximum": 120,
+                "description": "Timeout in seconds for each web request"
+            },
+            "max_content_length": {
+                "type": "integer",
+                "default": 10000,
+                "minimum": 1000,
+                "maximum": 50000,
+                "description": "Maximum content length to extract (in characters)"
+            },
+            "language": {
+                "type": "string",
+                "default": "auto",
+                "enum": ["auto", "en", "zh", "ja", "ko", "es", "fr", "de"],
+                "description": "Language for content processing (auto-detection by default)"
+            }
+        },
+        "required": ["urls"]
+    },
+    
+    "output_schema": {
+        "type": "object",
+        "properties": {
+            "success": {
+                "type": "boolean",
+                "description": "Whether the collection was successful"
+            },
+            "collected_data": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "Original URL"
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Extracted page title"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Extracted main content"
+                        },
+                        "summary": {
+                            "type": "string",
+                            "description": "Content summary (if extract_mode is 'summary' or 'key_points')"
+                        },
+                        "key_points": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Key points extracted from content"
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "properties": {
+                                "author": {
+                                    "type": "string"
+                                },
+                                "publish_date": {
+                                    "type": "string"
+                                },
+                                "word_count": {
+                                    "type": "integer"
+                                },
+                                "language": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "images": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "url": {
+                                        "type": "string"
+                                    },
+                                    "alt_text": {
+                                        "type": "string"
+                                    },
+                                    "caption": {
+                                        "type": "string"
+                                    }
+                                }
+                            },
+                            "description": "Extracted images (if include_images is true)"
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["success", "failed", "timeout", "invalid_url"]
+                        },
+                        "error_message": {
+                            "type": "string",
+                            "description": "Error message if status is not 'success'"
+                        }
+                    }
+                }
+            },
+            "statistics": {
+                "type": "object",
+                "properties": {
+                    "total_urls": {
+                        "type": "integer"
+                    },
+                    "successful_collections": {
+                        "type": "integer"
+                    },
+                    "failed_collections": {
+                        "type": "integer"
+                    },
+                    "total_content_length": {
+                        "type": "integer"
+                    },
+                    "processing_time": {
+                        "type": "number"
+                    }
+                }
+            }
+        },
+        "required": ["success", "collected_data", "statistics"]
+    },
+    
+    "default_parameters": {
+        "extract_mode": "full_text",
+        "include_images": false,
+        "timeout": 30,
+        "max_content_length": 10000,
+        "language": "auto"
+    },
+    
+    "rate_limits": {
+        "max_urls_per_request": 10,
+        "min_request_interval": 1,
+        "max_content_size": 5242880
+    },
+    
+    "supported_domains": [
+        "*.com",
+        "*.org",
+        "*.net",
+        "*.edu",
+        "*.gov",
+        "*.io",
+        "*.ai",
+        "*.cn",
+        "*.jp",
+        "*.kr"
+    ],
+    
+    "user_agent": "JinaWebCollector/1.0 (+https://jina.ai)",
+    
+    "privacy_policy": {
+        "data_retention": "none",
+        "log_retention": "24h",
+        "no_personal_data": true
+    }
+}
