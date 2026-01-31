@@ -36,7 +36,12 @@ export class AgentPlugin implements Plugin {
   }
 
   registerSystemTool(definition: any, handler: (args: any, context: any) => Promise<any>) {
-    this.systemTools.push({ definition, handler });
+    const tool = { definition, handler };
+    this.systemTools.push(tool);
+    // Dynamically add to existing agents
+    for (const agent of this.agents.values()) {
+        agent.addSystemTool(tool);
+    }
   }
 
   onAction(listener: (action: any) => void) {

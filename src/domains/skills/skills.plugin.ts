@@ -25,6 +25,7 @@ export class SkillsPlugin implements Plugin {
     try {
         this.agentPlugin = app.getService<AgentPlugin>("agent");
         this.registerEquipTool();
+        this.registerSearchTool();
     } catch (e) {
         console.warn("[Skills] AgentPlugin not available during setup. System tools might not be registered.");
     }
@@ -61,6 +62,40 @@ export class SkillsPlugin implements Plugin {
       }, async (args: any, context: any) => {
           return await this.equipSkill(args.name, context);
       });
+  }
+
+  private registerSearchTool() {
+      if (!this.agentPlugin) return;
+
+      this.agentPlugin.registerSystemTool({
+        name: "kairo_search_skills",
+        description: "Search for available skills by name or description.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {
+            query: { type: "string", description: "The search query (keywords)" }
+          },
+          required: ["query"]
+        }
+      }, async (args: any) => {
+          return this.searchSkills(args.query);
+      });
+  }
+
+  searchSkills(query: string) {
+      const skills = this.registry.getAllSkills();
+      const lowerQuery = query.toLowerCase();
+      const matches = skills.filter(s => 
+          s.name.toLowerCase().includes(lowerQuery) || 
+          s.description.toLowerCase().includes(lowerQuery) ||
+          (s.metadata.keywords && Array.isArray(s.metadata.keywords) && s.metadata.keywords.some((k: string) => k.toLowerCase().includes(lowerQuery)))
+      );
+      
+      if (matches.length === 0) {
+          return "No skills found matching your query.";
+      }
+      
+      return matches.map(s => `- **${s.name}**: ${s.description}`).join("\n");
   }
 
   async equipSkill(skillName: string, context: { agentId: string }) {

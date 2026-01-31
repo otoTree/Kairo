@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import fm from 'front-matter';
-import { Skill } from './types';
+import type { Skill } from './types';
 
 export class SkillRegistry {
   private skills: Map<string, Skill> = new Map();

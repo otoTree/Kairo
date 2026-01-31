@@ -1,4 +1,4 @@
-import { KairoEvent } from "../events/types";
+import type { KairoEvent } from "../events/types";
 
 export interface Skill {
   name: string;
