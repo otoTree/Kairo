@@ -30,7 +30,10 @@ describe("AgentRuntime (Event Driven)", () => {
     memory = new InMemoryAgentMemory();
     runtime = new AgentRuntime({
       ai: mockAI,
-      mcp: { callTool: async () => "Success" } as any, // Mock MCP
+      mcp: { 
+        callTool: async () => "Success",
+        getRelevantTools: async () => [{ name: "test_tool", description: "test", inputSchema: {} }]
+      } as any, // Mock MCP
       bus,
       memory,
     });

@@ -406,6 +406,11 @@ export class AgentRuntime {
           }
       }
 
+      const validActionTypes = ["say", "query", "noop"];
+      if (toolsContext && toolsContext.trim().length > 0) {
+          validActionTypes.push("tool_call");
+      }
+
       return `You are Kairo (Agent ${this.id}), an autonomous AI agent running on the user's local machine.
 Your goal is to assist the user with their tasks efficiently and safely.
 
@@ -433,17 +438,20 @@ ${facts}
 
 【Response Format】
 You must respond with a JSON object strictly. Do not include markdown code blocks (like \`\`\`json).
+
+Valid "action.type" values:
+${validActionTypes.map(t => `- "${t}"`).join('\n')}
+
 Format:
 {
   "thought": "Your reasoning process here...",
   "action": {
-    "type": "tool_call",
-    "function": {
-      "name": "tool_name",
-      "arguments": { ... }
-    }
+    "type": "one of [${validActionTypes.join(', ')}]",
+    ...
   }
 }
+
+Examples:
 
 To speak to the user:
 {
@@ -455,7 +463,19 @@ To ask the user a question:
 {
   "thought": "reasoning...",
   "action": { "type": "query", "content": "question to user" }
-}
+}${toolsContext && toolsContext.trim().length > 0 ? `
+
+To use a tool:
+{
+  "thought": "reasoning...",
+  "action": {
+    "type": "tool_call",
+    "function": {
+      "name": "tool_name",
+      "arguments": { ... }
+    }
+  }
+}` : ''}
 
 Or if no action is needed (waiting for user):
 {

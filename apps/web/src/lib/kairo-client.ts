@@ -3,10 +3,17 @@ import { globalBus } from './event-bus';
 export class KairoClient {
     private ws: WebSocket | null = null;
     private reconnectTimer: any = null;
-    private url: string = 'ws://localhost:3000/ws';
+    private url: string;
 
     constructor() {
-        // We can start connection explicitly
+        // Determine URL based on environment
+        if (import.meta.env.DEV) {
+             this.url = `ws://localhost:3000/ws`;
+        } else {
+             // Production: relative to host
+             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+             this.url = `${protocol}//${window.location.host}/ws`;
+        }
     }
 
     connect() {

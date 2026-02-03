@@ -11,8 +11,8 @@ export class OllamaProvider implements AIProvider {
   private defaultModel: string;
 
   constructor(options: OllamaOptions = {}) {
-    this.baseUrl = options.baseUrl || "http://localhost:11434";
-    this.defaultModel = options.defaultModel || "qwen3:0.6b";
+    this.baseUrl = options.baseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    this.defaultModel = options.defaultModel || process.env.OLLAMA_MODEL_NAME || "qwen3:0.6b";
   }
 
   async chat(messages: AIMessage[], options?: AICompletionOptions): Promise<AIChatResponse> {

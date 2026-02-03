@@ -1,0 +1,11 @@
+node_modules
+.git
+.env
+dist
+workspace
+deliverables
+kairo_python_env
+coverage
+test-results
+**/*.log
+.DS_Store
