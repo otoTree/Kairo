@@ -1,0 +1,7 @@
+{
+  "name": "filesystem-server",
+  "command": "bun",
+  "args": ["run", "mcp/filesystem/index.ts"],
+  "description": "Provides filesystem operations (read, write, list, etc.)",
+  "keywords": ["fs", "filesystem", "file", "read", "write"]
+}

@@ -12,12 +12,16 @@ export class MCPPlugin implements Plugin {
   private router: MCPRouter;
   private configs: MCPServerConfig[] = [];
 
-  constructor(configs: MCPServerConfig[] = []) {
+  constructor(configs: MCPServerConfig[] = [], private mcpDir?: string) {
     this.configs = configs;
     this.registry = new MCPRegistry(configs);
     // Use FullRouter by default if few tools, or KeywordRouter if many.
     // For now, let's use FullRouter to ensure we don't miss anything in MVP
     this.router = new FullMCPRouter(); 
+    
+    // If mcpDir is provided, we could potentially scan here or assume configs are already loaded?
+    // The current architecture loads configs *before* creating the plugin in bootstrap.
+    // However, to support dynamic reloading or lazy loading, we might want to know the dir.
   }
 
   setRouter(router: MCPRouter) {

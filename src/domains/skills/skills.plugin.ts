@@ -14,8 +14,8 @@ export class SkillsPlugin implements Plugin {
   private agentPlugin?: AgentPlugin;
   private app?: Application;
 
-  constructor() {
-    this.registry = new SkillRegistry(process.cwd());
+  constructor(private skillsDir: string = process.cwd()) {
+    this.registry = new SkillRegistry(this.skillsDir);
   }
 
   setup(app: Application) {
