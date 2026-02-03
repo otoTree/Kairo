@@ -23,6 +23,8 @@
     "@vscode/ripgrep": "^1.17.0",
     "front-matter": "^4.0.2",
     "hono": "^4.11.7",
+    "kysely": "^0.28.11",
+    "kysely-bun-sqlite": "^0.4.0",
     "lodash-es": "^4.17.23",
     "mitt": "^3.0.1",
     "shell-quote": "^1.8.3",

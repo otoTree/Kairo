@@ -3,10 +3,10 @@ import * as path from "path";
 import type { MCPServerConfig } from "../types";
 
 export async function scanLocalMcpServers(
+  baseDir: string = process.cwd(),
   mcpDirName: string = "mcp"
 ): Promise<MCPServerConfig[]> {
-  const rootDir = process.cwd();
-  const mcpDir = path.join(rootDir, mcpDirName);
+  const mcpDir = path.join(baseDir, mcpDirName);
   const configs: MCPServerConfig[] = [];
 
   try {
@@ -34,7 +34,7 @@ export async function scanLocalMcpServers(
         try {
             await fs.access(indexPath);
             config.command = "bun";
-            config.args = ["run", path.relative(rootDir, indexPath)];
+            config.args = ["run", path.relative(baseDir, indexPath)];
         } catch (e) {
             // No index.ts either, skip this directory
             if (!config.name) continue;

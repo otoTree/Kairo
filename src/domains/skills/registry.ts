@@ -7,8 +7,8 @@ export class SkillRegistry {
   private skills: Map<string, Skill> = new Map();
   private skillsDir: string;
 
-  constructor(rootDir: string) {
-    this.skillsDir = path.join(rootDir, 'skills');
+  constructor(skillsDir: string) {
+    this.skillsDir = skillsDir;
   }
 
   async scan(): Promise<Skill[]> {
