@@ -19,8 +19,8 @@ async function bootstrap() {
   try {
     // Configuration - Paths
     const PROJECT_ROOT = process.cwd();
-    // Python environment: sibling to project root
-    const PYTHON_ENV_DIR = path.join(PROJECT_ROOT, "..", "kairo_python_env");
+    // Python environment: sibling to project root, or override via env
+    const PYTHON_ENV_DIR = process.env.PYTHON_ENV_PATH || path.join(PROJECT_ROOT, "..", "kairo_python_env");
     const WORKSPACE_DIR = path.join(PROJECT_ROOT, "workspace");
     const DELIVERABLES_DIR = path.join(PROJECT_ROOT, "deliverables");
     const SKILLS_DIR = path.join(PROJECT_ROOT, "skills");
@@ -33,7 +33,7 @@ async function bootstrap() {
     console.log("[Config] MCP:", MCP_DIR);
 
     // Register plugins
-    await app.use(DatabasePlugin);
+    await app.use(new DatabasePlugin());
     await app.use(new HealthPlugin());
     
     // Sandbox with configuration
@@ -45,9 +45,9 @@ async function bootstrap() {
     
     // Setup AI with Ollama and OpenAI
     const openai = new OpenAIProvider({
-     defaultModel:"deepseek-chat",
-     baseUrl:"https://api.deepseek.com/v1",
-     apiKey:process.env.OPENAI_API_KEY,
+     defaultModel: process.env.OPENAI_MODEL_NAME || "deepseek-chat",
+     baseUrl: process.env.OPENAI_BASE_URL || "https://api.deepseek.com/v1",
+     apiKey: process.env.OPENAI_API_KEY,
     });
     await app.use(new AIPlugin([ openai]));
 
@@ -64,8 +64,10 @@ async function bootstrap() {
     await app.use(new SkillsPlugin(SKILLS_DIR));
 
     // Setup Server
-    const server = new ServerPlugin(3000);
+    const server = new ServerPlugin(Number(process.env.PORT || 3000));
     await app.use(server);
+
+
 
     await app.start();
 

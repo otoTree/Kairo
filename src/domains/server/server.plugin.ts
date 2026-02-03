@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { createBunWebSocket } from "hono/bun";
+import { serveStatic } from "hono/bun";
 import { cors } from "hono/cors";
 import type { WSContext } from "hono/ws";
 import type { Plugin } from "../../core/plugin";
@@ -32,6 +33,20 @@ export class ServerPlugin implements Plugin {
     }));
 
     this.app.get("/", (c) => c.json({ status: "ok", service: "Kairo Agent" }));
+
+    // Serve static files (Frontend)
+    this.app.use("/*", serveStatic({ root: "./public" }));
+    
+    // SPA Fallback: Serve index.html for non-API routes that didn't match a static file
+    // Note: This matches everything, so it must be last (or rely on serveStatic failing first)
+    // But serveStatic acts as a handler. If it doesn't find a file, it calls next().
+    this.app.use("*", async (c, next) => {
+        // If it's an API call that wasn't handled, return 404 (optional, but good practice)
+        if (c.req.path.startsWith("/api")) {
+            return next();
+        }
+        return serveStatic({ path: "index.html", root: "./public" })(c, next);
+    });
 
     this.app.get(
       "/ws",

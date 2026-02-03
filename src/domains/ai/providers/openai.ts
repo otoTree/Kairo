@@ -15,8 +15,8 @@ export class OpenAIProvider implements AIProvider {
 
   constructor(options: OpenAIOptions = {}) {
     this.apiKey = options.apiKey || process.env.OPENAI_API_KEY || "";
-    this.baseUrl = options.baseUrl || "https://api.openai.com/v1";
-    this.defaultModel = options.defaultModel || "gpt-3.5-turbo";
+    this.baseUrl = options.baseUrl || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+    this.defaultModel = options.defaultModel || process.env.OPENAI_MODEL_NAME || "gpt-3.5-turbo";
   }
 
   configure(options: OpenAIOptions) {
