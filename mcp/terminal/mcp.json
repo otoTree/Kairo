@@ -1,7 +1,0 @@
-{
-  "name": "terminal-server",
-  "command": "bun",
-  "args": ["run", "mcp/terminal/index.ts"],
-  "description": "Provides persistent terminal sessions with context maintenance",
-  "keywords": ["terminal", "shell", "bash", "session", "exec"]
-}

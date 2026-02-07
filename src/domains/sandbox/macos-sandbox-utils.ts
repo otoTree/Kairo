@@ -14,6 +14,7 @@ import {
 import type {
   FsReadRestrictionConfig,
   FsWriteRestrictionConfig,
+  ResourceLimitsConfig,
 } from './sandbox-schemas'
 import type { IgnoreViolationsConfig } from './sandbox-config'
 
@@ -36,6 +37,7 @@ export type MacOSSandboxParams = {
   allowLocalBinding?: boolean
   readConfig: FsReadRestrictionConfig | undefined
   writeConfig: FsWriteRestrictionConfig | undefined
+  resourceLimits?: ResourceLimitsConfig
   ignoreViolations?: IgnoreViolationsConfig | undefined
   binShell?: string
 }
@@ -602,10 +604,11 @@ export async function wrapCommandWithSandboxMacOS(
     readConfig,
     writeConfig,
     binShell,
+    resourceLimits,
   } = params
 
   // No sandboxing needed
-  if (!needsNetworkRestriction && !readConfig && !writeConfig) {
+  if (!needsNetworkRestriction && !readConfig && !writeConfig && !resourceLimits) {
     return command
   }
 
@@ -626,6 +629,22 @@ export async function wrapCommandWithSandboxMacOS(
   // Generate proxy environment variables using shared utility
   const proxyEnv = `export ${generateProxyEnvVars(httpProxyPort, socksProxyPort).join(' ')} && `
 
+  // Generate resource limit commands
+  let limitEnv = ''
+  if (resourceLimits) {
+      const limits: string[] = []
+      if (resourceLimits.memory) {
+          limits.push(`ulimit -v ${resourceLimits.memory * 1024}`)
+      }
+      // ulimit -t is CPU time in seconds, not percentage. 
+      // If cpu limit is provided (as quota), we can't easily enforce it via ulimit on macOS 
+      // without launchd. We'll skip CPU limit for now on macOS or assume it's ignored.
+      
+      if (limits.length > 0) {
+          limitEnv = `${limits.join('; ')} && `
+      }
+  }
+
   // Use the user's shell (zsh, bash, etc.) to ensure aliases/snapshots work
   // Resolve the full path to the shell binary
   const shellName = binShell || 'bash'
@@ -641,7 +660,7 @@ export async function wrapCommandWithSandboxMacOS(
     profile,
     shell,
     '-c',
-    proxyEnv + command,
+    proxyEnv + limitEnv + command,
   ])
 
   logForDebugging(

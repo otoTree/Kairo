@@ -10,6 +10,7 @@ import type {
   FsReadRestrictionConfig,
   FsWriteRestrictionConfig,
   NetworkRestrictionConfig,
+  ResourceLimitsConfig,
 } from './sandbox-schemas'
 import {
   wrapCommandWithSandboxLinux,
@@ -435,9 +436,10 @@ async function waitForNetworkInitialization(): Promise<boolean> {
 async function wrapWithSandbox(
   command: string,
   binShell?: string,
+  resourceLimits?: ResourceLimitsConfig,
 ): Promise<string> {
-  // If no config, return command as-is
-  if (!config) {
+  // If no config and no limits, return command as-is
+  if (!config && !resourceLimits) {
     return command
   }
 
@@ -460,6 +462,7 @@ async function wrapWithSandbox(
         allowLocalBinding: getAllowLocalBinding(),
         ignoreViolations: getIgnoreViolations(),
         binShell,
+        resourceLimits,
       })
 
     case 'linux':
@@ -477,6 +480,7 @@ async function wrapWithSandbox(
         allowAllUnixSockets: getAllowAllUnixSockets(),
         binShell,
         fallbackWorkDir: getFallbackWorkDir(),
+        resourceLimits,
       })
 
     default:
@@ -730,7 +734,7 @@ export type ISandboxManager = {
   getLinuxHttpSocketPath(): string | undefined
   getLinuxSocksSocketPath(): string | undefined
   waitForNetworkInitialization(): Promise<boolean>
-  wrapWithSandbox(command: string, binShell?: string): Promise<string>
+  wrapWithSandbox(command: string, binShell?: string, resourceLimits?: ResourceLimitsConfig): Promise<string>
   getSandboxViolationStore(): SandboxViolationStore
   annotateStderrWithSandboxFailures(command: string, stderr: string): string
   getLinuxGlobPatternWarnings(): string[]

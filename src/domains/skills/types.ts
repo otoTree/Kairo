@@ -1,11 +1,13 @@
 import type { KairoEvent } from "../events/types";
+import type { SkillManifestV2 } from "./manifest";
 
 export interface Skill {
   name: string;
   description: string;
   path: string; // Absolute path to skill directory
-  content: string; // Markdown content of SKILL.md
-  metadata: Record<string, any>; // Parsed frontmatter
+  content: string; // Markdown content of SKILL.md (if available)
+  metadata: Record<string, any>; // Parsed frontmatter or legacy metadata
+  manifest?: SkillManifestV2; // V2 Manifest
   hasScripts: boolean;
 }
 

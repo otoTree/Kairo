@@ -14,6 +14,7 @@ import {
 import type {
   FsReadRestrictionConfig,
   FsWriteRestrictionConfig,
+  ResourceLimitsConfig,
 } from './sandbox-schemas'
 import {
   generateSeccompFilter,
@@ -41,6 +42,7 @@ export type LinuxSandboxParams = {
   socksProxyPort?: number
   readConfig?: FsReadRestrictionConfig
   writeConfig?: FsWriteRestrictionConfig
+  resourceLimits?: ResourceLimitsConfig
   enableWeakerNestedSandbox?: boolean
   allowAllUnixSockets?: boolean
   binShell?: string
@@ -284,9 +286,9 @@ export function canUseBwrap(): boolean {
  * - Relies on applications respecting proxy environment variables for network filtering
  */
 function wrapCommandWithSandboxLinuxNoBwrap(
-  params: Pick<LinuxSandboxParams, 'command' | 'httpProxyPort' | 'socksProxyPort' | 'allowAllUnixSockets' | 'binShell' | 'fallbackWorkDir'>,
+  params: Pick<LinuxSandboxParams, 'command' | 'httpProxyPort' | 'socksProxyPort' | 'allowAllUnixSockets' | 'binShell' | 'fallbackWorkDir' | 'resourceLimits'>,
 ): string {
-  const { command, httpProxyPort, socksProxyPort, allowAllUnixSockets, binShell, fallbackWorkDir } = params
+  const { command, httpProxyPort, socksProxyPort, allowAllUnixSockets, binShell, fallbackWorkDir, resourceLimits } = params
 
   const proxyEnv = generateProxyEnvVars(httpProxyPort, socksProxyPort)
 
@@ -302,6 +304,25 @@ function wrapCommandWithSandboxLinuxNoBwrap(
     ? `cd ${shellquote.quote([fallbackWorkDir])} && ${command}`
     : command
 
+  let finalCommand = effectiveCommand
+
+  // Apply ulimit if needed (systemd-run might not work well in no-bwrap mode if it's a container)
+  // But let's try systemd-run if available, otherwise ulimit
+  if (resourceLimits) {
+      if (hasSystemdRunSync()) {
+          // We handle systemd-run at the outer layer
+      } else {
+          // Use ulimit
+          const limits = []
+          if (resourceLimits.memory) {
+             limits.push(`ulimit -v ${resourceLimits.memory * 1024}`)
+          }
+          if (limits.length > 0) {
+              finalCommand = `${limits.join('; ')}; ${effectiveCommand}`
+          }
+      }
+  }
+
   // Optionally apply seccomp filter to block AF_UNIX socket creation
   if (!allowAllUnixSockets) {
     const seccompFilterPath = generateSeccompFilter() ?? undefined
@@ -314,10 +335,10 @@ function wrapCommandWithSandboxLinuxNoBwrap(
         seccompFilterPath,
         shell,
         '-c',
-        effectiveCommand,
+        finalCommand,
       ])
       logForDebugging('[Sandbox Linux] Using no-bwrap isolation mode with seccomp(unix-block)')
-      return wrapped
+      return applySystemdRunIfPossible(wrapped, resourceLimits)
     } else {
       logForDebugging(
         '[Sandbox Linux] Seccomp filter unavailable in no-bwrap mode; proceeding without Unix socket block',
@@ -326,9 +347,40 @@ function wrapCommandWithSandboxLinuxNoBwrap(
     }
   }
 
-  const wrapped = shellquote.quote(['env', ...proxyEnv, shell, '-c', effectiveCommand])
+  const wrapped = shellquote.quote(['env', ...proxyEnv, shell, '-c', finalCommand])
   logForDebugging('[Sandbox Linux] Using no-bwrap isolation mode (env proxies only)')
-  return wrapped
+  return applySystemdRunIfPossible(wrapped, resourceLimits)
+}
+
+function applySystemdRunIfPossible(command: string, limits?: ResourceLimitsConfig): string {
+    if (!limits || !hasSystemdRunSync()) return command;
+    
+    const systemdArgs = ['--user', '--scope', '--quiet']
+    if (limits.memory) {
+        systemdArgs.push(`-p`, `MemoryMax=${limits.memory}M`)
+        systemdArgs.push(`-p`, `MemorySwapMax=0`) 
+    }
+    if (limits.cpu) {
+        systemdArgs.push(`-p`, `CPUQuota=${limits.cpu}%`)
+    }
+    
+    // systemd-run --scope -- command args...
+    // We need to parse the command string back to args or just pass it as one arg to sh -c?
+    // systemd-run expects executable and args.
+    // simpler to wrap in sh -c
+    return shellquote.quote(['systemd-run', ...systemdArgs, '/bin/sh', '-c', command])
+}
+
+/**
+ * Check if systemd-run is available
+ */
+function hasSystemdRunSync(): boolean {
+    try {
+        const res = spawnSync('systemd-run', ['--version'], { stdio: 'ignore' })
+        return res.status === 0
+    } catch {
+        return false
+    }
 }
 
 /**
@@ -341,9 +393,26 @@ function buildSandboxCommand(
   userCommand: string,
   seccompFilterPath: string | undefined,
   shell?: string,
+  resourceLimits?: ResourceLimitsConfig,
 ): string {
   // Default to bash for backward compatibility
   const shellPath = shell || 'bash'
+  
+  let effectiveUserCommand = userCommand
+  
+  // Apply ulimit if resource limits provided (and not handled by systemd-run externally)
+  if (resourceLimits) {
+      const limits = []
+      if (resourceLimits.memory) {
+          limits.push(`ulimit -v ${resourceLimits.memory * 1024}`)
+      }
+      // ulimit doesn't support CPU percentage, ignoring cpu limit here
+      
+      if (limits.length > 0) {
+          effectiveUserCommand = `${limits.join('; ')}; ${userCommand}`
+      }
+  }
+  
   const socatCommands = [
     `socat TCP-LISTEN:3128,fork,reuseaddr UNIX-CONNECT:${httpSocketPath} >/dev/null 2>&1 &`,
     `socat TCP-LISTEN:1080,fork,reuseaddr UNIX-CONNECT:${socksSocketPath} >/dev/null 2>&1 &`,
@@ -376,7 +445,7 @@ function buildSandboxCommand(
       seccompFilterPath,
       shellPath,
       '-c',
-      userCommand,
+      effectiveUserCommand,
     ])
 
     const innerScript = [...socatCommands, applySeccompCmd].join('\n')
@@ -385,7 +454,7 @@ function buildSandboxCommand(
     // No seccomp filter - run user command directly
     const innerScript = [
       ...socatCommands,
-      `eval ${shellquote.quote([userCommand])}`,
+      `eval ${shellquote.quote([effectiveUserCommand])}`,
     ].join('\n')
 
     return `${shellPath} -c ${shellquote.quote([innerScript])}`
@@ -568,6 +637,7 @@ export async function wrapCommandWithSandboxLinux(
     socksProxyPort,
     readConfig,
     writeConfig,
+    resourceLimits,
     enableWeakerNestedSandbox,
     allowAllUnixSockets,
     binShell,
@@ -575,7 +645,7 @@ export async function wrapCommandWithSandboxLinux(
   } = params
 
   // Check if we need any sandboxing
-  if (!hasNetworkRestrictions && !hasFilesystemRestrictions) {
+  if (!hasNetworkRestrictions && !hasFilesystemRestrictions && !resourceLimits) {
     return command
   }
 
@@ -599,6 +669,7 @@ export async function wrapCommandWithSandboxLinux(
         allowAllUnixSockets,
         binShell,
         fallbackWorkDir,
+        resourceLimits,
       })
     }
 

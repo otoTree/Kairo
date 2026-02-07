@@ -33,6 +33,7 @@ export class InMemoryGlobalBus implements EventBus {
   }
 
   async publish<T>(payload: Omit<KairoEvent<T>, "id" | "time" | "specversion">): Promise<string> {
+    // console.log('[EventBus] Publishing:', payload.type);
     const event: KairoEvent<T> = {
       ...payload,
       id: uuid(),

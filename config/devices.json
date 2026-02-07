@@ -1,0 +1,16 @@
+{
+  "mappings": [
+    {
+      "vid": "0403",
+      "pid": "6001",
+      "alias": "serial_adapter_01",
+      "type": "serial"
+    },
+    {
+      "vid": "1a86",
+      "pid": "7523",
+      "alias": "arduino_uno",
+      "type": "serial"
+    }
+  ]
+}

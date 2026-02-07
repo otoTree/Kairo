@@ -3,6 +3,8 @@ import { Application } from "../../core/app";
 import { AgentPlugin } from "../agent/agent.plugin";
 import { SkillRegistry } from "./registry";
 import { SandboxManager } from "../sandbox/sandbox-manager";
+import { ProcessManager } from "../kernel/process-manager";
+import { BinaryRunner } from "./binary-runner";
 import path from "path";
 import fs from "fs/promises";
 import { spawn } from "child_process";
@@ -11,11 +13,24 @@ import os from "os";
 export class SkillsPlugin implements Plugin {
   name = "skills";
   private registry: SkillRegistry;
+  private processManager: ProcessManager;
+  private binaryRunner: BinaryRunner;
   private agentPlugin?: AgentPlugin;
   private app?: Application;
 
   constructor(private skillsDir: string = process.cwd()) {
     this.registry = new SkillRegistry(this.skillsDir);
+    this.processManager = new ProcessManager();
+    this.binaryRunner = new BinaryRunner(this.processManager);
+  }
+
+  private async exists(path: string): Promise<boolean> {
+      try {
+          await fs.access(path);
+          return true;
+      } catch {
+          return false;
+      }
   }
 
   setup(app: Application) {
@@ -111,6 +126,43 @@ export class SkillsPlugin implements Plugin {
       });
 
       let response = `## Skill: ${skill.name}\n\n${skill.content}`;
+
+      // Binary Startup (V2 Manifest)
+      if (skill.manifest?.artifacts?.binaries) {
+          const platform = `${os.platform()}-${os.arch()}`; // e.g., darwin-arm64
+          const binaryRelPath = skill.manifest.artifacts.binaries[platform];
+
+          if (binaryRelPath) {
+              const binaryPath = path.resolve(skill.path, binaryRelPath);
+              try {
+                  await fs.access(binaryPath);
+                  const pid = await this.binaryRunner.run(skill.name, binaryPath);
+                  response += `\n\n**Binary Started:** Background process started with ID \`${pid}\`.`;
+              } catch (e) {
+                  console.error(`Failed to start binary for skill ${skill.name}:`, e);
+                  response += `\n\n**Binary Error:** Failed to start binary for platform ${platform}: ${e}`;
+              }
+          } else {
+              const available = Object.keys(skill.manifest.artifacts.binaries).join(", ");
+              response += `\n\n**Binary Warning:** No binary found for current platform (${platform}). Available: ${available}`;
+          }
+      }
+
+      // Container Orchestration Support
+      if (skill.manifest?.artifacts?.container_stack) {
+          const composePath = path.resolve(skill.path, skill.manifest.artifacts.container_stack);
+          
+          response += `\n\n### 🐳 Container Stack Required`;
+          response += `\nThis skill requires a container stack to function.`;
+          
+          if (await this.exists(composePath)) {
+              response += `\n\n**Action Required:** Please run the following command in the terminal to start the services:`;
+              response += `\n\n\`\`\`bash\npodman-compose -f "${composePath}" up -d\n\`\`\``;
+              response += `\n*(Or use \`docker compose\` if you prefer)*`;
+          } else {
+               response += `\n\n**Warning:** The compose file defined in manifest (\`${skill.manifest.artifacts.container_stack}\`) was not found at \`${composePath}\`.`;
+          }
+      }
 
       if (skill.hasScripts) {
           const scriptTool = {
