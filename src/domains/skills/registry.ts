@@ -1,7 +1,9 @@
 import fs from 'fs/promises';
 import path from 'path';
 import fm from 'front-matter';
+import yaml from 'js-yaml';
 import type { Skill } from './types';
+import type { SkillManifestV2 } from './manifest';
 
 export class SkillRegistry {
   private skills: Map<string, Skill> = new Map();
@@ -19,10 +21,6 @@ export class SkillRegistry {
       try {
         await fs.access(this.skillsDir);
       } catch {
-        // Create it if it doesn't exist? Or just warn?
-        // For now, let's just log and return empty, maybe user hasn't added any skills yet.
-        // But we should probably create the directory to encourage usage.
-        // await fs.mkdir(this.skillsDir, { recursive: true });
         console.warn(`Skills directory not found at ${this.skillsDir}`);
         return [];
       }
@@ -45,41 +43,86 @@ export class SkillRegistry {
     const skillPath = path.join(this.skillsDir, dirName);
     const readmePath = path.join(skillPath, 'SKILL.md');
     const scriptsPath = path.join(skillPath, 'scripts');
+    
+    // Manifest paths
+    const manifestYamlPath = path.join(skillPath, 'manifest.yaml');
+    const manifestJsonPath = path.join(skillPath, 'manifest.json');
+    const kairoYamlPath = path.join(skillPath, 'kairo.yaml'); // Alias
+
+    let manifest: SkillManifestV2 | undefined;
+    let content = '';
+    let metadata: Record<string, any> = {};
 
     try {
-      // Check for SKILL.md
+      // 1. Try to load V2 Manifest
       try {
-        await fs.access(readmePath);
-      } catch {
+        if (await this.exists(manifestYamlPath)) {
+          const raw = await fs.readFile(manifestYamlPath, 'utf-8');
+          manifest = yaml.load(raw) as SkillManifestV2;
+        } else if (await this.exists(kairoYamlPath)) {
+          const raw = await fs.readFile(kairoYamlPath, 'utf-8');
+          manifest = yaml.load(raw) as SkillManifestV2;
+        } else if (await this.exists(manifestJsonPath)) {
+          const raw = await fs.readFile(manifestJsonPath, 'utf-8');
+          manifest = JSON.parse(raw) as SkillManifestV2;
+        }
+      } catch (e) {
+        console.warn(`Failed to parse manifest for skill ${dirName}:`, e);
+      }
+
+      // 2. Try to load SKILL.md (Content + Legacy Metadata)
+      if (await this.exists(readmePath)) {
+        const raw = await fs.readFile(readmePath, 'utf-8');
+        const parsed = fm<any>(raw);
+        content = parsed.body;
+        // If no manifest found, use front-matter as metadata
+        if (!manifest) {
+          metadata = parsed.attributes;
+        } else {
+           // Merge front-matter into metadata, but manifest takes precedence for core fields
+           metadata = { ...parsed.attributes, ...metadata };
+        }
+      }
+
+      // 3. Validation: Must have either a manifest OR a valid SKILL.md with metadata
+      if (!manifest && Object.keys(metadata).length === 0) {
         // Not a valid skill directory
         return;
       }
 
-      const content = await fs.readFile(readmePath, 'utf-8');
-      const parsed = fm<any>(content);
-      
-      // Check for scripts directory
+      // 4. Check for scripts directory
       let hasScripts = false;
       try {
-        await fs.access(scriptsPath);
-        const scriptStats = await fs.stat(scriptsPath);
-        hasScripts = scriptStats.isDirectory();
+        if (await this.exists(scriptsPath)) {
+          const scriptStats = await fs.stat(scriptsPath);
+          hasScripts = scriptStats.isDirectory();
+        }
       } catch {
         hasScripts = false;
       }
 
       const skill: Skill = {
-        name: dirName,
-        description: parsed.attributes.description || parsed.attributes.name || dirName,
+        name: manifest?.name || metadata.name || dirName,
+        description: manifest?.description || metadata.description || dirName,
         path: skillPath,
-        content: parsed.body,
-        metadata: parsed.attributes,
+        content,
+        metadata,
+        manifest,
         hasScripts
       };
 
       this.skills.set(skill.name, skill);
     } catch (error) {
       console.error(`Failed to load skill ${dirName}:`, error);
+    }
+  }
+
+  private async exists(path: string): Promise<boolean> {
+    try {
+      await fs.access(path);
+      return true;
+    } catch {
+      return false;
     }
   }
 

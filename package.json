@@ -12,7 +12,8 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/lodash-es": "^4.17.12",
-    "@types/shell-quote": "^1.7.5"
+    "@types/shell-quote": "^1.7.5",
+    "@types/systeminformation": "^3.54.1"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -20,14 +21,23 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
     "@pondwader/socks5-server": "^1.0.10",
+    "@types/js-yaml": "^4.0.9",
     "@vscode/ripgrep": "^1.17.0",
     "front-matter": "^4.0.2",
     "hono": "^4.11.7",
+    "js-yaml": "^4.1.1",
     "kysely": "^0.28.11",
     "kysely-bun-sqlite": "^0.4.0",
     "lodash-es": "^4.17.23",
     "mitt": "^3.0.1",
+    "msgpackr": "^1.11.8",
+    "serialport": "^13.0.0",
     "shell-quote": "^1.8.3",
+    "systeminformation": "^5.30.7",
+    "usb-detection": "^4.14.2",
     "zod": "^4.3.6"
-  }
+  },
+  "trustedDependencies": [
+    "usb-detection"
+  ]
 }

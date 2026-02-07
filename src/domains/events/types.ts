@@ -1,3 +1,7 @@
+export interface KairoEventMap {
+  [key: string]: unknown;
+}
+
 export interface KairoEvent<T = unknown> {
   // Unique identifier for the event
   id: string;

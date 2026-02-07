@@ -19,6 +19,11 @@ export type NetworkHostPattern = {
   port: number | undefined
 }
 
+export type ResourceLimitsConfig = {
+  memory?: number // Memory limit in MB
+  cpu?: number // CPU usage limit (platform dependent implementation)
+}
+
 export type SandboxAskCallback = (
   params: NetworkHostPattern,
 ) => Promise<boolean>

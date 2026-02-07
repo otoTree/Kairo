@@ -119,6 +119,9 @@ export class AgentRuntime {
     // Subscribe to direct agent messages (Router handles user.message -> agent.ID.message)
     unsubs.push(this.bus.subscribe(`kairo.agent.${this.id}.message`, this.handleEvent.bind(this)));
 
+    // Subscribe to system events
+    unsubs.push(this.bus.subscribe("kairo.system.>", this.handleEvent.bind(this)));
+
     this.unsubscribe = () => {
       unsubs.forEach(u => u());
     };
@@ -388,6 +391,16 @@ export class AgentRuntime {
         type: "action_result",
         action: { type: "tool_call", function: { name: event.source.replace("tool:", "") } }, // Approximate
         result: (event.data as any).result || (event.data as any).error,
+        ts: new Date(event.time).getTime()
+      };
+    }
+
+    // 4. System Events
+    if (event.type.startsWith("kairo.system.")) {
+      return {
+        type: "system_event",
+        name: event.type,
+        payload: event.data,
         ts: new Date(event.time).getTime()
       };
     }
