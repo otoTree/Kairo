@@ -16,9 +16,11 @@ export class ServerPlugin implements Plugin {
   private agent?: AgentPlugin;
   private activeWebSockets: Set<WSContext<unknown>> = new Set();
   private server?: any;
+  private token?: string;
 
-  constructor(port: number = 3000) {
+  constructor(port: number = 3000, token?: string) {
     this.port = port;
+    this.token = token;
     this.app = new Hono();
     
     const { upgradeWebSocket, websocket } = createBunWebSocket<ServerWebSocket<unknown>>();
@@ -50,6 +52,18 @@ export class ServerPlugin implements Plugin {
 
     this.app.get(
       "/ws",
+      async (c, next) => {
+        if (this.token) {
+          const queryToken = c.req.query('token');
+          const headerToken = c.req.header('Authorization')?.replace('Bearer ', '');
+          
+          if (queryToken !== this.token && headerToken !== this.token) {
+            console.warn(`[Server] Unauthorized connection attempt to /ws`);
+            return c.text('Unauthorized', 401);
+          }
+        }
+        await next();
+      },
       upgradeWebSocket((c) => {
         return {
           onOpen: (event, ws) => {

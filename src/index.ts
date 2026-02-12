@@ -72,7 +72,10 @@ async function bootstrap() {
     await app.use(new SkillsPlugin(SKILLS_DIR));
 
     // Setup Server
-    const server = new ServerPlugin(Number(process.env.PORT || 3000));
+    const server = new ServerPlugin(
+      Number(process.env.PORT || 3000),
+      process.env.KAIRO_TOKEN || "kairo_default_secret"
+    );
     await app.use(server);
 
 

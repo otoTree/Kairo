@@ -1,0 +1,6 @@
+# Kairo Python Runtime Dependencies
+# Add libraries here that you want the Agent to have access to in the sandbox.
+# Example:
+# numpy
+# pandas
+# requests

@@ -32,6 +32,23 @@ export class PythonEnvManager {
         console.log(`[PythonEnv] Virtual environment created and configured.`);
     }
 
+    async installRequirements(requirementsPath: string) {
+        if (!existsSync(requirementsPath)) {
+            return;
+        }
+
+        console.log(`[PythonEnv] Installing dependencies from ${requirementsPath}...`);
+        const pipPath = path.join(this.envPath, "bin", "pip");
+        
+        try {
+            await this.runCommand(pipPath, ["install", "-r", requirementsPath]);
+            console.log(`[PythonEnv] Dependencies installed successfully.`);
+        } catch (error) {
+            console.error(`[PythonEnv] Failed to install dependencies:`, error);
+            // We don't throw here to avoid blocking startup if a package fails
+        }
+    }
+
     private runCommand(command: string, args: string[]): Promise<void> {
         return new Promise((resolve, reject) => {
             const proc = spawn(command, args, { stdio: "inherit" });

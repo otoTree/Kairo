@@ -36,6 +36,10 @@ export class SandboxPlugin implements Plugin {
         this.pythonEnv = new PythonEnvManager(this.config.pythonEnvPath);
         await this.pythonEnv.ensureEnv();
 
+        // Install dependencies from requirements.txt if it exists in project root
+        const requirementsPath = path.join(process.cwd(), "requirements.txt");
+        await this.pythonEnv.installRequirements(requirementsPath);
+
         // Ensure workspace and deliverables directories exist
         await fs.mkdir(this.config.workspacePath, { recursive: true });
         await fs.mkdir(this.config.deliverablesPath, { recursive: true });

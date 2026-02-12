@@ -6,13 +6,16 @@ export class KairoClient {
     private url: string;
 
     constructor() {
+        const token = import.meta.env.VITE_KAIRO_TOKEN || "kairo_default_secret";
+        const tokenParam = token ? `?token=${token}` : '';
+
         // Determine URL based on environment
         if (import.meta.env.DEV) {
-             this.url = `ws://localhost:3000/ws`;
+             this.url = `ws://localhost:3000/ws${tokenParam}`;
         } else {
              // Production: relative to host
              const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-             this.url = `${protocol}//${window.location.host}/ws`;
+             this.url = `${protocol}//${window.location.host}/ws${tokenParam}`;
         }
     }
 
