@@ -1,3 +1,7 @@
+# [DEPRECATED] Kairo AgentOS MVP v0.1
+
+> **NOTICE**: This document is deprecated. Please refer to [agentos-mvp.md](./agentos-mvp.md) for the latest consolidated specification.
+
 # Kairo AgentOS MVP v0.1（OS 视角最小可行内核）
 
 ## 1. 目标与边界（Goal & Non-Goals）
