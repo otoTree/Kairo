@@ -1,6 +1,7 @@
 import mitt, { type Emitter } from 'mitt';
 import fs from 'fs/promises';
 import path from 'path';
+import type { StateRepository } from '../database/repositories/state-repository';
 
 export type DeviceType = 'serial' | 'camera' | 'audio_in' | 'audio_out' | 'gpio';
 
@@ -28,12 +29,38 @@ type DeviceRegistryEvents = {
   'device:released': { id: string; owner: string };
 };
 
+export interface DeviceClaim {
+  deviceId: string;
+  ownerId: string;
+  claimedAt: number;
+}
+
 export class DeviceRegistry {
   private devices = new Map<string, DeviceInfo>();
   public readonly events: Emitter<DeviceRegistryEvents> = mitt<DeviceRegistryEvents>();
   private mappings: DeviceMapping[] = [];
+  private pendingClaims = new Map<string, DeviceClaim>();
 
-  constructor(private configPath: string = path.join(process.cwd(), 'config', 'devices.json')) {}
+  constructor(
+    private configPath: string = path.join(process.cwd(), 'config', 'devices.json'),
+    private stateRepo?: StateRepository
+  ) {}
+
+  async recover() {
+    if (!this.stateRepo) return;
+    const claims = await this.stateRepo.getByPrefix<DeviceClaim>('device:claim:');
+    console.log(`[DeviceRegistry] Recovered ${claims.length} claims`);
+    for (const { value: claim } of claims) {
+      const device = this.devices.get(claim.deviceId);
+      if (device) {
+        device.owner = claim.ownerId;
+        device.status = 'busy';
+        this.events.emit('device:claimed', { id: claim.deviceId, owner: claim.ownerId });
+      } else {
+        this.pendingClaims.set(claim.deviceId, claim);
+      }
+    }
+  }
 
   async loadConfig() {
     try {
@@ -66,13 +93,27 @@ export class DeviceRegistry {
         device.owner = existing.owner;
         device.status = existing.status;
     } else {
-        device.owner = null;
-        device.status = 'available';
+        // Check pending claims
+        const pending = this.pendingClaims.get(device.id);
+        if (pending) {
+            console.log(`[DeviceRegistry] Applying pending claim for ${device.id} to ${pending.ownerId}`);
+            device.owner = pending.ownerId;
+            device.status = 'busy';
+            this.pendingClaims.delete(device.id);
+        } else {
+            device.owner = null;
+            device.status = 'available';
+        }
     }
     
     this.devices.set(device.id, device);
     console.log(`[DeviceRegistry] Registered ${device.id} (${device.type})`);
     this.events.emit('device:connected', device);
+    
+    if (device.owner && !existing) {
+         // If we applied a pending claim, emit claimed event
+         this.events.emit('device:claimed', { id: device.id, owner: device.owner });
+    }
   }
 
   unregister(id: string) {
@@ -83,7 +124,7 @@ export class DeviceRegistry {
     }
   }
 
-  claim(deviceId: string, ownerId: string): boolean {
+  async claim(deviceId: string, ownerId: string): Promise<boolean> {
     const device = this.devices.get(deviceId);
     if (!device) {
         throw new Error(`Device ${deviceId} not found`);
@@ -101,25 +142,51 @@ export class DeviceRegistry {
     device.owner = ownerId;
     this.devices.set(deviceId, device); // Update map
     
+    if (this.stateRepo) {
+      await this.stateRepo.save(`device:claim:${deviceId}`, {
+        deviceId,
+        ownerId,
+        claimedAt: Date.now()
+      });
+    }
+
     this.events.emit('device:claimed', { id: deviceId, owner: ownerId });
     console.log(`[DeviceRegistry] Device ${deviceId} claimed by ${ownerId}`);
     return true;
   }
 
-  release(deviceId: string, ownerId: string): boolean {
+  async release(deviceId: string, ownerId: string): Promise<boolean> {
     const device = this.devices.get(deviceId);
     if (!device) {
-        // Idempotent: if device is gone, release is implicitly successful
-        return true; 
+         // If device is disconnected but we have a pending claim?
+         // Spec says: "Recover Device Claims".
+         // If we release a device that is not currently connected (but claimed in DB), we should clear DB.
+         // But `devices.get` only checks connected devices.
+         // We should also check pendingClaims.
+         if (this.pendingClaims.has(deviceId)) {
+             const claim = this.pendingClaims.get(deviceId);
+             if (claim && claim.ownerId === ownerId) {
+                 this.pendingClaims.delete(deviceId);
+                 if (this.stateRepo) {
+                     await this.stateRepo.delete(`device:claim:${deviceId}`);
+                 }
+                 return true;
+             }
+         }
+         throw new Error(`Device ${deviceId} not found`);
     }
 
     if (device.owner !== ownerId) {
-        throw new Error(`Device ${deviceId} is not owned by ${ownerId}`);
+        throw new Error(`Device ${deviceId} is not claimed by ${ownerId}`);
     }
 
     device.status = 'available';
     device.owner = null;
     this.devices.set(deviceId, device);
+    
+    if (this.stateRepo) {
+      await this.stateRepo.delete(`device:claim:${deviceId}`);
+    }
 
     this.events.emit('device:released', { id: deviceId, owner: ownerId });
     console.log(`[DeviceRegistry] Device ${deviceId} released by ${ownerId}`);

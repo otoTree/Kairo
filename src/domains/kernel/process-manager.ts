@@ -1,9 +1,10 @@
-import { spawn, type Subprocess } from 'bun';
+import { spawn, type Subprocess, type FileSink } from 'bun';
 import { SandboxManager } from '../sandbox/sandbox-manager';
 import { quote } from 'shell-quote';
 import { EventEmitter } from 'node:events';
+import type { StateRepository } from '../database/repositories/state-repository';
 
-import { SandboxRuntimeConfig } from '../sandbox/sandbox-config';
+import type { SandboxRuntimeConfig } from '../sandbox/sandbox-config';
 
 export interface ProcessOptions {
   cwd?: string;
@@ -15,9 +16,50 @@ export interface ProcessOptions {
   sandbox?: SandboxRuntimeConfig;
 }
 
+export interface ProcessState {
+  id: string;
+  pid: number;
+  command: string[];
+  options: ProcessOptions;
+  startTime: number;
+  endTime?: number;
+  status: 'running' | 'exited' | 'abnormal_exit';
+  exitCode?: number;
+}
+
 export class ProcessManager extends EventEmitter {
   private processes = new Map<string, Subprocess>();
   private pidMap = new Map<string, number>();
+
+  constructor(private stateRepo?: StateRepository) {
+    super();
+  }
+
+  async recover() {
+    if (!this.stateRepo) return;
+    const processes = await this.stateRepo.getByPrefix<ProcessState>('process:');
+    
+    for (const { value: state } of processes) {
+      if (state.status === 'running') {
+        try {
+          // Check if process exists (signal 0)
+          process.kill(state.pid, 0);
+          
+          console.log(`[ProcessManager] Recovered process ${state.id} (PID: ${state.pid}) - Still Running`);
+          // Mark as running but we can't control it fully without Subprocess handle
+          // For now, we just acknowledge it exists.
+          this.pidMap.set(state.id, state.pid);
+          
+        } catch (e) {
+          console.log(`[ProcessManager] Process ${state.id} (PID: ${state.pid}) is gone. Marking abnormal_exit.`);
+          state.status = 'abnormal_exit';
+          state.endTime = Date.now();
+          await this.stateRepo.save(`process:${state.id}`, state);
+          // Emit exit event? Maybe not, since it happened while we were down.
+        }
+      }
+    }
+  }
 
   async spawn(id: string, command: string[], options: ProcessOptions = {}): Promise<void> {
     let finalCommand = command;
@@ -53,6 +95,18 @@ export class ProcessManager extends EventEmitter {
     
     console.log(`[ProcessManager] Spawned process ${id} (PID: ${proc.pid})`);
 
+    if (this.stateRepo) {
+      const state: ProcessState = {
+        id,
+        pid: proc.pid,
+        command,
+        options,
+        startTime: Date.now(),
+        status: 'running'
+      };
+      await this.stateRepo.save(`process:${id}`, state).catch((e: unknown) => console.error(`[ProcessManager] Failed to save state for ${id}:`, e));
+    }
+
     // Handle stdout
     if (proc.stdout) {
       this.streamToEvent(id, 'stdout', proc.stdout);
@@ -64,7 +118,21 @@ export class ProcessManager extends EventEmitter {
     }
 
     // Handle exit
-    proc.exited.then((code) => {
+    proc.exited.then(async (code) => {
+        if (this.stateRepo) {
+          try {
+            const state = await this.stateRepo.get<ProcessState>(`process:${id}`);
+            if (state) {
+              state.status = 'exited';
+              state.exitCode = code;
+              state.endTime = Date.now();
+              await this.stateRepo.save(`process:${id}`, state);
+            }
+          } catch (e) {
+            console.error(`[ProcessManager] Failed to update state for ${id}:`, e);
+          }
+        }
+
         this.emit('exit', { id, code });
         this.cleanup(id);
     });
@@ -85,9 +153,11 @@ export class ProcessManager extends EventEmitter {
 
   writeToStdin(id: string, data: string | Buffer | Uint8Array): void {
     const proc = this.processes.get(id);
-    if (proc && proc.stdin) {
-      proc.stdin.write(data);
-      proc.stdin.flush();
+    if (proc && proc.stdin && typeof proc.stdin === 'object') {
+      const stdin = proc.stdin as FileSink;
+      // Bun's FileSink interface: write(chunk: string | ArrayBufferView | ArrayBuffer | SharedArrayBuffer): number
+      stdin.write(data);
+      stdin.flush();
     } else {
       throw new Error(`Process ${id} not found or stdin not available`);
     }

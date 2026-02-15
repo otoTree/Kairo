@@ -32,8 +32,8 @@ describe('Device Integration Tests (Mock)', () => {
         expect(mockDevice?.status).toBe('available');
     });
 
-    it('should claim device', () => {
-        const success = registry.claim('mock_serial_01', 'test_agent');
+    it('should claim device', async () => {
+        const success = await registry.claim('mock_serial_01', 'test_agent');
         expect(success).toBe(true);
         
         const device = registry.get('mock_serial_01');
@@ -41,10 +41,8 @@ describe('Device Integration Tests (Mock)', () => {
         expect(device?.owner).toBe('test_agent');
     });
 
-    it('should fail to claim already claimed device', () => {
-        expect(() => {
-            registry.claim('mock_serial_01', 'another_agent');
-        }).toThrow();
+    it('should fail to claim already claimed device', async () => {
+        expect(registry.claim('mock_serial_01', 'another_agent')).rejects.toThrow();
     });
 
     it('should get driver and communicate', async () => {
@@ -64,7 +62,7 @@ describe('Device Integration Tests (Mock)', () => {
     it('should release device', async () => {
         await manager.releaseDriver('mock_serial_01');
         
-        const success = registry.release('mock_serial_01', 'test_agent');
+        const success = await registry.release('mock_serial_01', 'test_agent');
         expect(success).toBe(true);
         
         const device = registry.get('mock_serial_01');

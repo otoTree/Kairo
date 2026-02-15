@@ -7,6 +7,9 @@ import { KernelEventBridge } from "./bridge";
 import { ShellManager } from "./terminal/shell";
 import { IPCServer } from "./ipc-server";
 import type { AgentPlugin } from "../agent/agent.plugin";
+import { StateRepository } from "../database/repositories/state-repository";
+import { CheckpointRepository } from "../database/repositories/checkpoint-repository";
+import { KernelStateManager } from "./state-manager";
 
 import { Vault } from "../vault/vault";
 import { rootLogger } from "../observability/logger";
@@ -19,16 +22,22 @@ export class KernelPlugin implements Plugin {
   public readonly processManager: ProcessManager;
   public readonly shellManager: ShellManager;
   public readonly ipcServer: IPCServer;
+  public readonly stateRepository: StateRepository;
+  public readonly checkpointRepository: CheckpointRepository;
+  public readonly stateManager: KernelStateManager;
   private bridge?: KernelEventBridge;
 
   private app?: Application;
 
   constructor() {
+    this.stateRepository = new StateRepository();
+    this.checkpointRepository = new CheckpointRepository();
     this.systemMonitor = new SystemMonitor();
-    this.deviceRegistry = new DeviceRegistry();
-    this.processManager = new ProcessManager();
+    this.deviceRegistry = new DeviceRegistry(undefined, this.stateRepository);
+    this.processManager = new ProcessManager(this.stateRepository);
     this.shellManager = new ShellManager();
     this.ipcServer = new IPCServer(this.processManager, this.systemMonitor, this.deviceRegistry);
+    this.stateManager = new KernelStateManager(this.stateRepository, this.checkpointRepository);
   }
 
   setup(app: Application): void {
@@ -56,6 +65,10 @@ export class KernelPlugin implements Plugin {
   async start(): Promise<void> {
     if (!this.app) return;
 
+    // Recover state
+    await this.processManager.recover();
+    await this.deviceRegistry.recover();
+
     // Start IPC Server
     try {
         await this.ipcServer.start();
@@ -81,6 +94,7 @@ export class KernelPlugin implements Plugin {
 
       // Register System Tools
       this.registerTerminalTools(agentPlugin);
+      this.registerStateTools(agentPlugin);
 
     } catch (e) {
       rootLogger.warn("[Kernel] AgentPlugin not found. Event Bridge & Tools disabled.");
@@ -155,5 +169,29 @@ export class KernelPlugin implements Plugin {
     });
     
     rootLogger.info("[Kernel] Registered Terminal Tools");
+  }
+
+  private registerStateTools(agent: AgentPlugin) {
+    agent.registerSystemTool({
+      name: "kairo_state_save",
+      description: "Save current system state checkpoint.",
+      inputSchema: { type: "object", properties: {} }
+    }, async () => {
+      const id = await this.stateManager.saveCheckpoint();
+      return { content: `Checkpoint saved: ${id}` };
+    });
+    
+    agent.registerSystemTool({
+      name: "kairo_state_restore",
+      description: "Restore system state from checkpoint.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"]
+      }
+    }, async (params: any) => {
+      await this.stateManager.restoreCheckpoint(params.id);
+      return { content: `Checkpoint restored: ${params.id}. Please restart Kernel.` };
+    });
   }
 }

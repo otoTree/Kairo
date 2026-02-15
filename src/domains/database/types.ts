@@ -9,6 +9,20 @@ export interface EventsTable {
   created_at: number;
 }
 
+export interface SystemStateTable {
+  key: string;
+  value: string;
+  updated_at: number;
+}
+
+export interface CheckpointsTable {
+  id: string;
+  created_at: number;
+  data: string;
+}
+
 export interface Database {
   events: EventsTable;
+  system_state: SystemStateTable;
+  checkpoints: CheckpointsTable;
 }
