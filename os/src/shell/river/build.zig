@@ -1,0 +1,273 @@
+// SPDX-FileCopyrightText: © 2020 The River Developers
+// SPDX-License-Identifier: GPL-3.0-only
+
+const std = @import("std");
+const assert = std.debug.assert;
+const Build = std.Build;
+const fs = std.fs;
+const mem = std.mem;
+
+const Scanner = @import("wayland").Scanner;
+
+pub fn build(b: *Build) !void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const strip = b.option(bool, "strip", "Omit debug information") orelse false;
+    const pie = b.option(bool, "pie", "Build a Position Independent Executable") orelse false;
+
+    const omit_frame_pointer = switch (optimize) {
+        .Debug, .ReleaseSafe => false,
+        .ReleaseFast, .ReleaseSmall => true,
+    };
+
+    const man_pages = b.option(
+        bool,
+        "man-pages",
+        "Set to true to build man pages. Requires scdoc. Defaults to true if scdoc is found.",
+    ) orelse scdoc_found: {
+        _ = b.findProgram(&.{"scdoc"}, &.{}) catch |err| switch (err) {
+            error.FileNotFound => break :scdoc_found false,
+            else => return err,
+        };
+        break :scdoc_found true;
+    };
+
+    const xwayland = b.option(
+        bool,
+        "xwayland",
+        "Set to true to enable xwayland support",
+    ) orelse false;
+
+    const full_version = blk: {
+        if (mem.endsWith(u8, version, "-dev")) {
+            var ret: u8 = undefined;
+
+            const git_describe_long = b.runAllowFail(
+                &.{ "git", "-C", b.build_root.path orelse ".", "describe", "--long" },
+                &ret,
+                .Ignore,
+            ) catch break :blk version;
+
+            var it = mem.splitSequence(u8, mem.trim(u8, git_describe_long, &std.ascii.whitespace), "-");
+            _ = it.next().?; // previous tag
+            const commit_count = it.next().?;
+            const commit_hash = it.next().?;
+            assert(it.next() == null);
+            assert(commit_hash[0] == 'g');
+
+            // Follow semantic versioning, e.g. 0.2.0-dev.42+d1cf95b
+            break :blk b.fmt(version ++ ".{s}+{s}", .{ commit_count, commit_hash[1..] });
+        } else {
+            break :blk version;
+        }
+    };
+
+    const options = b.addOptions();
+    options.addOption(bool, "xwayland", xwayland);
+    options.addOption([]const u8, "version", full_version);
+
+    const scanner = Scanner.create(b, .{});
+
+    scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+    scanner.addSystemProtocol("stable/viewporter/viewporter.xml");
+    scanner.addSystemProtocol("staging/cursor-shape/cursor-shape-v1.xml");
+    scanner.addSystemProtocol("staging/ext-session-lock/ext-session-lock-v1.xml");
+    scanner.addSystemProtocol("staging/single-pixel-buffer/single-pixel-buffer-v1.xml");
+    scanner.addSystemProtocol("unstable/pointer-constraints/pointer-constraints-unstable-v1.xml");
+    scanner.addSystemProtocol("unstable/pointer-gestures/pointer-gestures-unstable-v1.xml");
+    scanner.addSystemProtocol("unstable/tablet/tablet-unstable-v2.xml");
+    scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
+
+    scanner.addCustomProtocol(b.path("protocol/river-window-management-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/river-xkb-bindings-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/river-layer-shell-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/river-input-management-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/river-libinput-config-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/river-xkb-config-v1.xml"));
+
+    scanner.addCustomProtocol(b.path("protocol/upstream/wlr-layer-shell-unstable-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocol/upstream/wlr-output-power-management-unstable-v1.xml"));
+
+    // Some of these versions may be out of date with what wlroots implements.
+    // This is not a problem in practice though as long as river successfully compiles.
+    // These versions control Zig code generation and have no effect on anything internal
+    // to wlroots. Therefore, the only thnig that can happen due to a version being too
+    // old is that river fails to compile.
+    scanner.generate("wl_compositor", 4);
+    scanner.generate("wl_subcompositor", 1);
+    scanner.generate("wl_shm", 1);
+    scanner.generate("wl_output", 4);
+    scanner.generate("wl_seat", 7);
+    scanner.generate("wl_data_device_manager", 3);
+
+    scanner.generate("xdg_wm_base", 2);
+    scanner.generate("zwp_pointer_gestures_v1", 3);
+    scanner.generate("zwp_pointer_constraints_v1", 1);
+    scanner.generate("zwp_tablet_manager_v2", 1);
+    scanner.generate("zxdg_decoration_manager_v1", 1);
+    scanner.generate("ext_session_lock_manager_v1", 1);
+    scanner.generate("wp_cursor_shape_manager_v1", 1);
+    scanner.generate("wp_viewporter", 1);
+    scanner.generate("wp_single_pixel_buffer_manager_v1", 1);
+
+    scanner.generate("river_window_manager_v1", 3);
+    scanner.generate("river_xkb_bindings_v1", 2);
+    scanner.generate("river_layer_shell_v1", 1);
+    scanner.generate("river_input_manager_v1", 1);
+    scanner.generate("river_libinput_config_v1", 1);
+    scanner.generate("river_xkb_config_v1", 1);
+
+    scanner.generate("zwlr_output_power_manager_v1", 1);
+    scanner.generate("zwlr_layer_shell_v1", 4);
+
+    const wayland = b.createModule(.{ .root_source_file = scanner.result });
+
+    const xkbcommon = b.dependency("xkbcommon", .{}).module("xkbcommon");
+    const pixman = b.dependency("pixman", .{}).module("pixman");
+
+    const wlroots = b.dependency("wlroots", .{}).module("wlroots");
+    wlroots.addImport("wayland", wayland);
+    wlroots.addImport("xkbcommon", xkbcommon);
+    wlroots.addImport("pixman", pixman);
+
+    // We need to ensure the wlroots include path obtained from pkg-config is
+    // exposed to the wlroots module for @cImport() to work. This seems to be
+    // the best way to do so with the current std.Build API.
+    wlroots.resolved_target = target;
+    const wlroots_pkgconf = "wlroots-0.19";
+    wlroots.linkSystemLibrary(wlroots_pkgconf, .{});
+
+    const flags = b.createModule(.{ .root_source_file = b.path("common/flags.zig") });
+    const slotmap = b.createModule(.{ .root_source_file = b.path("common/slotmap.zig") });
+    const deque = b.createModule(.{ .root_source_file = b.path("common/deque.zig") });
+
+    {
+        const river = b.addExecutable(.{
+            .name = "river",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("river/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .strip = strip,
+            }),
+        });
+        river.root_module.addOptions("build_options", options);
+
+        river.linkLibC();
+        river.linkSystemLibrary("libevdev");
+        river.linkSystemLibrary("libinput");
+        river.linkSystemLibrary("wayland-server");
+        river.linkSystemLibrary(wlroots_pkgconf);
+        river.linkSystemLibrary("xkbcommon");
+        river.linkSystemLibrary("pixman-1");
+
+        river.root_module.addImport("wayland", wayland);
+        river.root_module.addImport("xkbcommon", xkbcommon);
+        river.root_module.addImport("pixman", pixman);
+        river.root_module.addImport("wlroots", wlroots);
+        river.root_module.addImport("flags", flags);
+        river.root_module.addImport("slotmap", slotmap);
+        river.root_module.addImport("deque", deque);
+
+        river.addCSourceFile(.{
+            .file = b.path("river/wlroots_log_wrapper.c"),
+            .flags = &.{ "-std=c99", "-O2" },
+        });
+
+        river.pie = pie;
+        river.root_module.omit_frame_pointer = omit_frame_pointer;
+
+        b.installArtifact(river);
+    }
+
+    {
+        const wf = Build.Step.WriteFile.create(b);
+        const pc_file = wf.add("river-protocols.pc", b.fmt(
+            \\prefix={s}
+            \\datarootdir=${{prefix}}/share
+            \\pkgdatadir=${{pc_sysrootdir}}${{datarootdir}}/river-protocols
+            \\
+            \\Name: river-protocols
+            \\URL: https://isaacfreund.com/software/river
+            \\Description: Protocol files for river, a non-monolithic Wayland compositor
+            \\Version: {s}
+        , .{ b.install_prefix, full_version }));
+        b.getInstallStep().dependOn(&b.addInstallFile(pc_file, "share/pkgconfig/river-protocols.pc").step);
+        inline for (&.{
+            "river-window-management-v1.xml",
+            "river-xkb-bindings-v1.xml",
+            "river-layer-shell-v1.xml",
+            "river-input-management-v1.xml",
+            "river-libinput-config-v1.xml",
+            "river-xkb-config-v1.xml",
+        }) |protocol| {
+            b.installFile("protocol/" ++ protocol, "share/river-protocols/stable/" ++ protocol);
+        }
+    }
+
+    if (man_pages) {
+        inline for (.{"river"}) |page| {
+            // Workaround for https://github.com/ziglang/zig/issues/16369
+            // Even passing a buffer to std.Build.Step.Run appears to be racy and occasionally deadlocks.
+            const scdoc = b.addSystemCommand(&.{ "/bin/sh", "-c", "scdoc < doc/" ++ page ++ ".1.scd" });
+            // This makes the caching work for the Workaround, and the extra argument is ignored by /bin/sh.
+            scdoc.addFileArg(b.path("doc/" ++ page ++ ".1.scd"));
+
+            const stdout = scdoc.captureStdOut();
+            b.getInstallStep().dependOn(&b.addInstallFile(stdout, "share/man/man1/" ++ page ++ ".1").step);
+        }
+    }
+
+    {
+        const slotmap_test = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("common/slotmap.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        const run_slotmap_test = b.addRunArtifact(slotmap_test);
+
+        const deque_test = b.addTest(.{
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("common/deque.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        const run_deque_test = b.addRunArtifact(deque_test);
+
+        const test_step = b.step("test", "Run the tests");
+        test_step.dependOn(&run_slotmap_test.step);
+        test_step.dependOn(&run_deque_test.step);
+    }
+}
+
+const version = manifest.version;
+/// Getting rid of this wart requires upstream zig improvements.
+/// See: https://github.com/ziglang/zig/issues/22775
+const manifest: struct {
+    name: @Type(.enum_literal),
+    version: []const u8,
+    paths: []const []const u8,
+    dependencies: struct {
+        pixman: struct {
+            url: []const u8,
+            hash: []const u8,
+        },
+        wayland: struct {
+            url: []const u8,
+            hash: []const u8,
+        },
+        wlroots: struct {
+            url: []const u8,
+            hash: []const u8,
+        },
+        xkbcommon: struct {
+            url: []const u8,
+            hash: []const u8,
+        },
+    },
+    fingerprint: u64,
+} = @import("build.zig.zon");

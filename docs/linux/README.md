@@ -8,6 +8,8 @@
     *   概述了发行版选择、架构设计和路线图。
 *   **[Kairo Linux 开发指南](./dev_setup.md)** (`dev_setup.md`)
     *   详细说明了如何在 macOS 上搭建开发环境（Zig, QEMU, Docker）。
+*   **[Kairo Linux 实施任务清单](./implementation_tasks.md)** (`implementation_tasks.md`)
+    *   从零构建 Kairo Shell 及集成 Kernel 的详细开发步骤清单。
 *   **[Kairo 内核实现指南](./kernel_implementation_guide.md)** (`kernel_implementation_guide.md`)
     *   内核架构总览。
 *   **[Kairo Init (Zig) 功能规范](./zig_init_spec.md)** (`zig_init_spec.md`)
