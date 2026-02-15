@@ -2,6 +2,8 @@
 
 本文档概述了构建 Kairo AgentOS 自定义 Linux 发行版的计划。
 
+> **开发指南**: 关于如何在 macOS 上搭建开发环境并测试构建，请参阅 [Linux 开发指南](./dev_setup.md)。
+
 ## 1. 基础发行版选择 (Base Distribution Selection)
 *   **选项 A: Alpine Linux** (推荐：极简与安全)
     *   优点：极其轻量，面向安全 (musl libc)，包管理简单 (apk)。
@@ -26,7 +28,7 @@
     *   自动登录到 `kairo` 用户。
 
 ## 4. Kairo Shell (合成器/Compositor)
-*   **架构**: 基于 **Smithay** (Rust) 或 **wlroots** (C) 的 Wayland Compositor。
+*   **架构**: 基于 **Zig** + **wlroots** 的 Wayland Compositor。
 *   **后端**: DRM/KMS (Direct Rendering Manager / Kernel Mode Setting)，用于无 X11 的硬件加速。
 *   **输入**: `libinput` 用于处理键盘、鼠标和触摸事件。
 

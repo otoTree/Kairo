@@ -57,8 +57,10 @@
     - [ ] 定义 `kairo.agent.render.commit` (UI 更新) 和 `kairo.ui.signal` (交互信号) 事件结构。
 - [ ] **Linux 发行版定制 (Kairo Distro)**
     - [ ] 选择基础发行版 (Alpine/Arch/Debian Minimal)。
-    - [ ] 构建自定义 ISO，集成 Kairo Kernel 和 Shell。
-    - [ ] 移除现有桌面环境 (GNOME/KDE)，确保 Kairo Shell 作为唯一会话启动。
+    - [x] 初始化 OS 开发环境 (`os/` 目录与 Zig 构建脚本)。
+    - [ ] 实现 Kairo Init 进程 (Zig, PID 1)。
+    - [ ] 构建自定义 ISO/RootFS (Docker + Alpine)。
+    - [ ] 在 macOS 上通过 QEMU 验证启动流程。
 - [ ] **前端合成器 (Kairo Compositor)**
     - [ ] 基于 Rust Smithay 或 wlroots 构建 Wayland Compositor。
     - [ ] 实现 DRM/KMS 后端，支持直接硬件渲染。

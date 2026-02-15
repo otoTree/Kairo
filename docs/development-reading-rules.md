@@ -13,7 +13,7 @@
 2. 体系结构与总览：architecture/ 目录内的系统架构与运行时相关文档
 3. MVP 体系：mvp/README.md 然后按 01～07 顺序阅读
 4. 版本规划：version/ 按 v0.1 到 v1.0 顺序阅读
-5. 专题规范与补充：local-database-spec.md、skill-integration-spec.md、stateful-agent-hz.md、linux_customization_plan.md
+5. 专题规范与补充：local-database-spec.md、skill-integration-spec.md、stateful-agent-hz.md、linux/plan.md
 
 ## 三、阅读方法
 

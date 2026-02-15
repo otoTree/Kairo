@@ -26,8 +26,8 @@ To support true "Linux Native Desktop Rendering", we will introduce **Kairo Shel
 为了支持真正的“Linux 原生桌面渲染”，我们将引入 **Kairo Shell**，一个 Wayland 合成器。
 
 ### 1. Kairo Shell (Compositor) | Kairo Shell (合成器)
-- **Technology**: Built using [Smithay](https://github.com/Smithay/smithay) (Rust) or [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) (C).
-  **技术**: 使用 [Smithay](https://github.com/Smithay/smithay) (Rust) 或 [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) (C) 构建。
+- **Technology**: Built using **Zig** and [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots).
+  **技术**: 使用 **Zig** 和 [wlroots](https://gitlab.freedesktop.org/wlroots/wlroots) 构建。
 - **Role**: It replaces the standard Desktop Environment (GNOME/KDE).
   **角色**: 它取代了标准的桌面环境 (GNOME/KDE)。
 - **Integration**:
