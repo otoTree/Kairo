@@ -25,12 +25,16 @@ export class MemCube {
     return id;
   }
 
-  async recall(query: MemoryQuery): Promise<MemoryResult[]> {
-    // 1. Generate query embedding
-    // 2. Calculate cosine similarity
-    // 3. Return top K results
+  async memorize(content: string): Promise<void> {
+      await this.add(content);
+  }
+
+  async recall(query: string): Promise<string[]>;
+  async recall(query: MemoryQuery): Promise<MemoryResult[]>;
+  async recall(query: MemoryQuery | string): Promise<MemoryResult[] | string[]> {
+    const text = typeof query === 'string' ? query : query.text;
     
-    const queryEmbedding = await this.ai.embed(query.text, { provider: this.embeddingProviderName });
+    const queryEmbedding = await this.ai.embed(text, { provider: this.embeddingProviderName });
     const vecA = queryEmbedding.embedding;
 
     const results = this.entries.map(entry => {
@@ -42,13 +46,15 @@ export class MemCube {
     // Sort by score descending
     results.sort((a, b) => b.score - a.score);
 
-    // Filter by threshold
-    const threshold = query.threshold ?? 0.7;
-    const filtered = results.filter(r => r.score >= threshold);
+    const limit = typeof query === 'object' && query.limit ? query.limit : 5;
+    const threshold = typeof query === 'object' && query.threshold ? query.threshold : 0.7;
 
-    // Limit
-    const limit = query.limit ?? 5;
-    return filtered.slice(0, limit);
+    const filtered = results.filter(r => r.score >= threshold).slice(0, limit);
+
+    if (typeof query === 'string') {
+        return filtered.map(r => r.entry.content);
+    }
+    return filtered;
   }
 
   private cosineSimilarity(vecA: number[], vecB: number[]): number {

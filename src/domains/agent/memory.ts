@@ -2,6 +2,11 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import type { AIPlugin } from "../ai/ai.plugin";
 
+export interface LongTermMemory {
+  recall(query: string): Promise<string[]>;
+  memorize(content: string): Promise<void>;
+}
+
 export interface AgentMemory {
   getContext(): string;
   update(params: {
@@ -11,6 +16,8 @@ export interface AgentMemory {
     actionResult?: string;
   }): void;
   compress(ai: AIPlugin): Promise<void>;
+  recall(query: string): Promise<string[]>;
+  memorize(content: string): Promise<void>;
 }
 
 export class InMemoryAgentMemory implements AgentMemory {
@@ -19,11 +26,31 @@ export class InMemoryAgentMemory implements AgentMemory {
   private readonly limit: number;
   private readonly storageDir: string;
 
-  constructor(limit: number = 50) {
+  constructor(limit: number = 50, private longTermMemory?: LongTermMemory) {
     this.limit = limit;
     this.storageDir = path.join(process.cwd(), "memory");
     this.initStorage();
   }
+
+  // ... (keep existing methods)
+
+  async recall(query: string): Promise<string[]> {
+    if (this.longTermMemory) {
+        return this.longTermMemory.recall(query);
+    }
+    return [];
+  }
+
+  async memorize(content: string): Promise<void> {
+    if (this.longTermMemory) {
+        await this.longTermMemory.memorize(content);
+    }
+  }
+
+  public setLongTermMemory(ltm: LongTermMemory) {
+      this.longTermMemory = ltm;
+  }
+
 
   private async initStorage() {
     try {

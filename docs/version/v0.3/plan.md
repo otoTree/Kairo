@@ -29,7 +29,7 @@
 - 设备层权限与资源调度
  
  ## Todo
- - 升级 Agent 主循环为 Recall-Plan-Act-Memorize
- - 统一 tool.invoke/tool.result 的链路标识
- - 定义 intent started/ended 事件并贯通
- - 建立工具层对 handle 的透传规则
+- [x] 升级 Agent 主循环为 Recall-Plan-Act-Memorize
+- [x] 统一 tool.invoke/tool.result 的链路标识
+- [x] 定义 intent started/ended 事件并贯通
+- [x] 建立工具层对 handle 的透传规则

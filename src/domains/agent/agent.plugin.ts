@@ -7,6 +7,8 @@ import { InMemoryAgentMemory, type AgentMemory } from "./memory";
 import { InMemorySharedMemory, type SharedMemory } from "./shared-memory";
 import { AgentRuntime, type SystemTool } from "./runtime";
 import { InMemoryGlobalBus, RingBufferEventStore, type EventBus, type KairoEvent } from "../events";
+import type { Vault } from "../vault/vault";
+import type { MemCube } from "../memory/memcube";
 
 export class AgentPlugin implements Plugin {
   readonly name = "agent";
@@ -26,6 +28,8 @@ export class AgentPlugin implements Plugin {
   
   private ai?: AIPlugin;
   private mcp?: MCPPlugin;
+  private vault?: Vault;
+  private memCube?: MemCube;
   private systemTools: SystemTool[] = [];
 
   constructor() {
@@ -95,7 +99,24 @@ export class AgentPlugin implements Plugin {
       console.warn("[Agent] MCP service not found. Tools will be disabled.");
     }
 
+    try {
+        this.vault = this.app.getService<Vault>("vault");
+    } catch (e) {
+        console.warn("[Agent] Vault service not found.");
+    }
+
+    try {
+        this.memCube = this.app.getService<MemCube>("memCube");
+    } catch (e) {
+        console.warn("[Agent] MemCube service not found.");
+    }
+
     // Spawn default agent
+    // If MemCube is available, inject it into the default memory
+    if (this.memCube && this.memory instanceof InMemoryAgentMemory) {
+        this.memory.setLongTermMemory(this.memCube);
+    }
+
     this.spawnAgent("default", this.memory);
 
     // Subscribe to user messages for routing
@@ -146,13 +167,19 @@ export class AgentPlugin implements Plugin {
   private spawnAgent(id: string, memory?: AgentMemory) {
       if (this.agents.has(id)) return this.agents.get(id)!;
       
+      const agentMemory = memory || new InMemoryAgentMemory();
+      if (this.memCube && agentMemory instanceof InMemoryAgentMemory) {
+          agentMemory.setLongTermMemory(this.memCube);
+      }
+
       const runtime = new AgentRuntime({
           id,
           ai: this.ai!,
           mcp: this.mcp,
           bus: this.globalBus,
-          memory: memory || new InMemoryAgentMemory(),
+          memory: agentMemory,
           sharedMemory: this.sharedMemory,
+          vault: this.vault,
           onAction: (a) => this.actionListeners.forEach(l => l(a)),
           onLog: (l) => this.logListeners.forEach(l => l(l)),
           onActionResult: (r) => this.actionResultListeners.forEach(l => l(r)),

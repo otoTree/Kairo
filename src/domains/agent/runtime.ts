@@ -17,6 +17,10 @@ export interface SystemTool {
   handler: (args: any, context: SystemToolContext) => Promise<any>;
 }
 
+export interface VaultResolver {
+  resolve(handleId: string): string | undefined;
+}
+
 export interface AgentRuntimeOptions {
   id?: string;
   ai: AIPlugin;
@@ -24,6 +28,7 @@ export interface AgentRuntimeOptions {
   bus: EventBus;
   memory: AgentMemory;
   sharedMemory?: SharedMemory;
+  vault?: VaultResolver;
   onAction?: (action: any) => void;
   onLog?: (log: any) => void;
   onActionResult?: (result: any) => void;
@@ -37,6 +42,7 @@ export class AgentRuntime {
   private bus: EventBus;
   private memory: AgentMemory;
   private sharedMemory?: SharedMemory;
+  private vault?: VaultResolver;
   private onAction?: (action: any) => void;
   private onLog?: (log: any) => void;
   private onActionResult?: (result: any) => void;
@@ -63,6 +69,7 @@ export class AgentRuntime {
     this.bus = options.bus;
     this.memory = options.memory;
     this.sharedMemory = options.sharedMemory;
+    this.vault = options.vault;
     this.onAction = options.onAction;
     this.onLog = options.onLog;
     this.onActionResult = options.onActionResult;
@@ -255,7 +262,12 @@ export class AgentRuntime {
     }
 
     // Construct Prompt
-    const systemPrompt = await this.getSystemPrompt(context, toolsContext);
+    // RECALL: Query memory before planning
+    const recentContext = observations.map(o => JSON.stringify(o)).join(" ").slice(-500);
+    const recalledMemories = await this.memory.recall(recentContext);
+    const memoryContext = recalledMemories.length > 0 ? `\n【Recalled Memories】\n${recalledMemories.join('\n')}` : "";
+
+    const systemPrompt = await this.getSystemPrompt(context, toolsContext, memoryContext);
     const userPrompt = this.composeUserPrompt(observations);
     
     // Determine context for tracing
@@ -283,7 +295,7 @@ export class AgentRuntime {
       this.log(`Thought: ${thought}`);
       this.log(`Action:`, action);
 
-      // Publish Thought Event
+      // Publish Thought Event (Intent Started)
       this.bus.publish({
           type: "kairo.agent.thought",
           source: "agent:" + this.id,
@@ -292,11 +304,20 @@ export class AgentRuntime {
           causationId
       });
 
+      // PLAN: Intent Started
+      this.bus.publish({
+          type: "kairo.intent.started",
+          source: "agent:" + this.id,
+          data: { intent: thought },
+          correlationId,
+          causationId
+      });
+
       let actionResult = null;
       let actionEventId: string | undefined;
 
       if (action.type === 'say' || action.type === 'query') {
-          // Publish Action Event
+          // ACT: Publish Action Event
           actionEventId = await this.bus.publish({
               type: "kairo.agent.action",
               source: "agent:" + this.id,
@@ -305,26 +326,41 @@ export class AgentRuntime {
               causationId
           });
           actionResult = "Displayed to user";
-      } else if (action.type === 'tool_call' && this.mcp) {
+          
+          // MEMORIZE: Intent Ended (Immediate)
+          this.bus.publish({
+              type: "kairo.intent.ended",
+              source: "agent:" + this.id,
+              data: { result: actionResult },
+              correlationId,
+              causationId: actionEventId
+          });
+
+      } else if (action.type === 'tool_call') {
           // Validate action structure
           if (!action.function || !action.function.name) {
               const errorMsg = "Invalid tool_call action: missing function name";
               console.error("[AgentRuntime]", errorMsg, action);
               
-              // We need to feed this error back to the agent so it can correct itself
-              // instead of crashing or getting stuck.
-              // We simulate a result event with error.
               this.bus.publish({
                  type: "kairo.tool.result",
-                 source: "system", // System error
+                 source: "system", 
                  data: { error: errorMsg },
-                 causationId: actionEventId || causationId, // Fallback if actionEventId not created
+                 causationId: actionEventId || causationId,
                  correlationId
               });
+
+              // Intent Ended with Error
+              this.bus.publish({
+                  type: "kairo.intent.ended",
+                  source: "agent:" + this.id,
+                  data: { error: errorMsg },
+                  correlationId,
+                  causationId
+              });
               
-              // Skip execution
           } else {
-              // Publish Action Event
+              // ACT: Publish Action Event
               actionEventId = await this.bus.publish({
                   type: "kairo.agent.action",
                   source: "agent:" + this.id,
@@ -353,6 +389,15 @@ export class AgentRuntime {
                      correlationId
                  });
 
+                 // MEMORIZE: Intent Ended (Success)
+                 this.bus.publish({
+                     type: "kairo.intent.ended",
+                     source: "agent:" + this.id,
+                     data: { result: actionResult },
+                     correlationId,
+                     causationId: actionEventId
+                 });
+
               } catch (e: any) {
                  actionResult = `Tool call failed: ${e.message}`;
 
@@ -363,6 +408,15 @@ export class AgentRuntime {
                      causationId: actionEventId,
                      correlationId
                  });
+
+                 // MEMORIZE: Intent Ended (Failure)
+                 this.bus.publish({
+                     type: "kairo.intent.ended",
+                     source: "agent:" + this.id,
+                     data: { error: e.message },
+                     correlationId,
+                     causationId: actionEventId
+                 });
               }
           }
       } else {
@@ -370,13 +424,13 @@ export class AgentRuntime {
       }
 
       // Update Memory
-      // For tool calls, we defer result to the event loop (observed as action_result)
       this.memory.update({
         observation: JSON.stringify(observations), 
         thought,
         action: JSON.stringify(action),
         actionResult: action.type === 'tool_call' ? undefined : (actionResult ? (typeof actionResult === 'string' ? actionResult : JSON.stringify(actionResult)) : undefined)
       });
+
 
     } catch (error) {
       console.error("[AgentRuntime] Error in tick:", error);
@@ -426,7 +480,7 @@ export class AgentRuntime {
   
   // Helper methods (getSystemPrompt, composeUserPrompt, parseResponse, dispatchToolCall)
   
-  private async getSystemPrompt(context: string, toolsContext: string): Promise<string> {
+  private async getSystemPrompt(context: string, toolsContext: string, memoryContext: string): Promise<string> {
       let facts = "";
       if (this.sharedMemory) {
           const allFacts = await this.sharedMemory.getFacts();
@@ -447,6 +501,9 @@ Your goal is to assist the user with their tasks efficiently and safely.
 - OS: ${process.platform}
 - CWD: ${process.cwd()}
 - Date: ${new Date().toISOString()}
+
+${facts}
+${memoryContext}
 
 【Capabilities】
 - You can execute shell commands.
@@ -548,6 +605,9 @@ Or if no action is needed (waiting for user):
     const { name, arguments: args } = action.function;
     this.log(`Executing tool: ${name}`, args);
     
+    // Resolve handles in args
+    const resolvedArgs = this.resolveHandles(args);
+    
     if (this.onAction) {
         this.onAction(action);
     }
@@ -555,7 +615,7 @@ Or if no action is needed (waiting for user):
     // Check System Tools first
     if (this.systemTools.has(name)) {
         try {
-            return await this.systemTools.get(name)!.handler(args, context);
+            return await this.systemTools.get(name)!.handler(resolvedArgs, context);
         } catch (e: any) {
              throw new Error(`System tool execution failed: ${e.message}`);
         }
@@ -563,6 +623,37 @@ Or if no action is needed (waiting for user):
 
     if (!this.mcp) throw new Error("MCP not enabled and tool not found in system tools");
     
-    return await this.mcp.callTool(name, args);
+    return await this.mcp.callTool(name, resolvedArgs);
+  }
+
+  private resolveHandles(args: any): any {
+    if (!this.vault) return args;
+
+    const resolve = (obj: any): any => {
+        if (typeof obj === 'string') {
+            if (obj.startsWith('vault:')) {
+                const val = this.vault!.resolve(obj);
+                if (val !== undefined) return val;
+            }
+            return obj;
+        }
+        if (Array.isArray(obj)) {
+            return obj.map(resolve);
+        }
+        if (typeof obj === 'object' && obj !== null) {
+            const newObj: any = {};
+            for (const key in obj) {
+                newObj[key] = resolve(obj[key]);
+            }
+            return newObj;
+        }
+        return obj;
+    };
+    
+    // Simple deep clone by JSON parse/stringify if needed, but the recursive function handles structure.
+    // However, we should be careful not to mutate the original args if they are reused (which they shouldn't be).
+    // Let's just clone first to be safe.
+    const clone = JSON.parse(JSON.stringify(args));
+    return resolve(clone);
   }
 }
