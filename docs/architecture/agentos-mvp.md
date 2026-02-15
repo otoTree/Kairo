@@ -95,6 +95,13 @@ graph TD
 *   **Handle**: 格式如 `sh_vault_12345` 的字符串，代表一个敏感资源。
 *   **Attestation**: 内核在 Skill 兑换 Handle 时，校验调用进程的 PID、Binary Hash 和 Runtime Token，确保不被伪造。
 
+### 3.5 协作原语 (Collaboration Ops)
+*   **Window Management**: `window.create(type, content, options)` 创建协作窗口。
+*   **Sharing**: `window.share(content, target)` 将内容推送到共享空间。
+*   **Focus**: `window.focus(range, reason)` 标记关注区域。
+*   **Collaborative Edit**: `collab.edit(target, changes, intent)` 带意图的编辑。
+*   **Conflict Resolution**: `collab.resolve(conflict_id, resolution)` 解决冲突。
+
 ---
 
 ## 4. Agent 生命周期 (The Stateful Loop)
