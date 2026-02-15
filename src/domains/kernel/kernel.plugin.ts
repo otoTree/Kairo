@@ -8,6 +8,8 @@ import { ShellManager } from "./terminal/shell";
 import { IPCServer } from "./ipc-server";
 import type { AgentPlugin } from "../agent/agent.plugin";
 
+import { Vault } from "../vault/vault";
+
 export class KernelPlugin implements Plugin {
   name = "kernel";
   
@@ -33,6 +35,14 @@ export class KernelPlugin implements Plugin {
     app.registerService("kernel", this);
     // Expose deviceRegistry so DevicePlugin can use it
     app.registerService("deviceRegistry", this.deviceRegistry);
+    
+    try {
+        const vault = app.getService<Vault>("vault");
+        this.ipcServer.setVault(vault);
+    } catch (e) {
+        console.warn("[Kernel] Vault service not available.");
+    }
+
     this.registerTools();
   }
 

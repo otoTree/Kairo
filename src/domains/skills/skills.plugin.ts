@@ -11,6 +11,8 @@ import fs from "fs/promises";
 import { spawn } from "child_process";
 import os from "os";
 
+import { Vault } from "../vault/vault";
+
 export class SkillsPlugin implements Plugin {
   name = "skills";
   private registry: SkillRegistry;
@@ -37,6 +39,13 @@ export class SkillsPlugin implements Plugin {
   setup(app: Application) {
     this.app = app;
     app.registerService("skills", this);
+
+    try {
+        const vault = app.getService<Vault>("vault");
+        this.binaryRunner.setVault(vault);
+    } catch (e) {
+        console.warn("[Skills] Vault service not available. Secrets resolution disabled.");
+    }
 
     try {
         this.agentPlugin = app.getService<AgentPlugin>("agent");

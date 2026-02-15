@@ -4,6 +4,7 @@ import { Protocol, PacketType, type Packet } from './protocol';
 import type { ProcessManager } from './process-manager';
 import type { SystemMonitor } from './system-info';
 import type { DeviceRegistry } from '../device/registry';
+import type { Vault } from '../vault/vault';
 
 export class IPCServer {
   private socketPath: string;
@@ -15,10 +16,15 @@ export class IPCServer {
     private processManager: ProcessManager,
     private systemMonitor: SystemMonitor,
     private deviceRegistry: DeviceRegistry,
+    private vault?: Vault,
     socketPath: string = '/tmp/kairo-kernel.sock'
   ) {
     this.socketPath = socketPath;
     this.setupProcessEvents();
+  }
+
+  setVault(vault: Vault) {
+    this.vault = vault;
   }
 
   private setupProcessEvents() {
@@ -142,6 +148,17 @@ export class IPCServer {
                 result = this.deviceRegistry.list();
                 break;
             
+            case 'vault.get':
+                if (!this.vault) throw new Error('Vault service not available');
+                if (!params?.token || !params?.handle) throw new Error('Missing params: token, handle');
+                
+                const secret = this.vault.resolveWithToken(params.token, params.handle);
+                if (secret === undefined) {
+                    throw new Error('Access denied or invalid handle');
+                }
+                result = { value: secret };
+                break;
+
             default:
                 throw new Error(`Unknown method: ${method}`);
          }
