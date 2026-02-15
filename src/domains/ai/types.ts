@@ -21,7 +21,18 @@ export interface AIChatResponse {
   usage?: AIUsage;
 }
 
+export interface AIEmbeddingOptions {
+  model?: string;
+  dimensions?: number;
+}
+
+export interface AIEmbeddingResponse {
+  embedding: number[];
+  usage?: AIUsage;
+}
+
 export interface AIProvider {
   name: string;
   chat(messages: AIMessage[], options?: AICompletionOptions): Promise<AIChatResponse>;
+  embed(text: string, options?: AIEmbeddingOptions): Promise<AIEmbeddingResponse>;
 }

@@ -12,6 +12,8 @@ import { scanLocalMcpServers } from "./domains/mcp/utils/loader";
 import { SkillsPlugin } from "./domains/skills/skills.plugin";
 import { KernelPlugin } from "./domains/kernel/kernel.plugin";
 import { DevicePlugin } from "./domains/device/device.plugin";
+import { MemoryPlugin } from "./domains/memory/memory.plugin";
+import { VaultPlugin } from "./domains/vault/vault.plugin";
 import path from "path";
 
 const app = new Application();
@@ -51,7 +53,31 @@ async function bootstrap() {
      baseUrl: process.env.OPENAI_BASE_URL || "https://api.deepseek.com/v1",
      apiKey: process.env.OPENAI_API_KEY,
     });
-    await app.use(new AIPlugin([ openai]));
+    
+    // Check if separate embedding configuration is provided
+    const providers = [openai];
+    const embeddingBaseUrl = process.env.OPENAI_EMBEDDING_BASE_URL;
+    const embeddingApiKey = process.env.OPENAI_EMBEDDING_API_KEY || process.env.OPENAI_API_KEY; // Fallback to main key if not specific
+
+    if (embeddingBaseUrl) {
+        const embeddingProvider = new OpenAIProvider({
+            name: "openai-embedding",
+            baseUrl: embeddingBaseUrl,
+            apiKey: embeddingApiKey,
+            defaultEmbeddingModel: process.env.OPENAI_EMBEDDING_MODEL_NAME || "text-embedding-3-small"
+        });
+        providers.push(embeddingProvider);
+        console.log("[AI] Configured separate embedding provider: openai-embedding");
+    }
+
+    await app.use(new AIPlugin(providers));
+
+    // Setup Memory (Depends on AI)
+    // If separate embedding provider exists, use it; otherwise use default
+    await app.use(new MemoryPlugin(embeddingBaseUrl ? "openai-embedding" : undefined));
+
+    // Setup Vault
+    await app.use(new VaultPlugin());
 
     // Setup MCP
     // Pass PROJECT_ROOT as baseDir, and "mcp" as dirName.

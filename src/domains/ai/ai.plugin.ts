@@ -1,6 +1,6 @@
 import type { Plugin } from "../../core/plugin";
 import type { Application } from "../../core/app";
-import type { AIProvider, AIMessage, AICompletionOptions, AIChatResponse } from "./types";
+import type { AIProvider, AIMessage, AICompletionOptions, AIChatResponse, AIEmbeddingOptions, AIEmbeddingResponse } from "./types";
 
 export class AIPlugin implements Plugin {
   readonly name = "ai";
@@ -34,6 +34,11 @@ export class AIPlugin implements Plugin {
   async chat(messages: AIMessage[], options?: AICompletionOptions & { provider?: string }): Promise<AIChatResponse> {
     const provider = this.getProvider(options?.provider);
     return provider.chat(messages, options);
+  }
+
+  async embed(text: string, options?: AIEmbeddingOptions & { provider?: string }): Promise<AIEmbeddingResponse> {
+    const provider = this.getProvider(options?.provider);
+    return provider.embed(text, options);
   }
 
   setup(app: Application) {
