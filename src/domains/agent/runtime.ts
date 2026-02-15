@@ -5,9 +5,14 @@ import type { AgentMemory } from "./memory";
 import type { SharedMemory } from "./shared-memory";
 import type { EventBus, KairoEvent } from "../events";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { rootLogger } from "../observability/logger";
+import type { Logger } from "../observability/types";
+import { randomUUID } from "crypto";
 
 export interface SystemToolContext {
   agentId: string;
+  traceId?: string;
+  spanId?: string;
   correlationId?: string;
   causationId?: string;
 }
@@ -46,6 +51,10 @@ export class AgentRuntime {
   private onAction?: (action: any) => void;
   private onLog?: (log: any) => void;
   private onActionResult?: (result: any) => void;
+  private systemTools: Map<string, SystemTool> = new Map();
+  private logger: Logger;
+  private currentTraceContext?: { traceId: string; spanId: string };
+  
   private tickCount: number = 0;
   private running: boolean = false;
   private unsubscribe?: () => void;
@@ -60,10 +69,8 @@ export class AgentRuntime {
   // Internal event buffer to replace legacy adapter
   private eventBuffer: KairoEvent[] = [];
 
-  private systemTools: Map<string, SystemTool> = new Map();
-
   constructor(options: AgentRuntimeOptions) {
-    this.id = options.id || crypto.randomUUID();
+    this.id = options.id || "default";
     this.ai = options.ai;
     this.mcp = options.mcp;
     this.bus = options.bus;
@@ -73,31 +80,30 @@ export class AgentRuntime {
     this.onAction = options.onAction;
     this.onLog = options.onLog;
     this.onActionResult = options.onActionResult;
-
+    this.logger = rootLogger.child({ component: `AgentRuntime:${this.id}` });
+    
     if (options.systemTools) {
-      options.systemTools.forEach(t => this.systemTools.set(t.definition.name, t));
+        options.systemTools.forEach(t => {
+            this.registerSystemTool(t.definition, t.handler);
+        });
     }
   }
 
-  public addSystemTool(tool: SystemTool) {
-    this.systemTools.set(tool.definition.name, tool);
-  }
-
-  private get hz(): number {
-    const now = Date.now();
-    // Keep only ticks within the last 1000ms
-    this.tickHistory = this.tickHistory.filter(t => now - t < 1000);
-    return this.tickHistory.length;
+  registerSystemTool(definition: Tool, handler: (args: any, context: SystemToolContext) => Promise<any>) {
+    this.systemTools.set(definition.name, { definition, handler });
   }
 
   private log(message: string, data?: any) {
-    console.log(`[AgentRuntime] ${message}`, data ? data : "");
+    const logger = this.currentTraceContext ? this.logger.withContext(this.currentTraceContext) : this.logger;
+    logger.info(message, data);
+    
     if (this.onLog) {
       this.onLog({
         type: 'debug',
         message: message,
         data: data,
-        ts: Date.now()
+        ts: Date.now(),
+        ...this.currentTraceContext
       });
     }
   }
@@ -199,7 +205,18 @@ export class AgentRuntime {
       this.eventBuffer = [];
       
       if (eventsToProcess.length > 0) {
-        await this.tick(eventsToProcess);
+        // Trace Setup
+        const trigger = eventsToProcess[eventsToProcess.length - 1];
+        this.currentTraceContext = {
+            traceId: trigger?.traceId || randomUUID(),
+            spanId: randomUUID(),
+        };
+
+        try {
+            await this.tick(eventsToProcess);
+        } finally {
+            this.currentTraceContext = undefined;
+        }
       }
     } catch (error) {
       console.error("[AgentRuntime] Tick error:", error);
@@ -296,7 +313,7 @@ export class AgentRuntime {
       this.log(`Action:`, action);
 
       // Publish Thought Event (Intent Started)
-      this.bus.publish({
+      this.publish({
           type: "kairo.agent.thought",
           source: "agent:" + this.id,
           data: { thought },
@@ -305,7 +322,7 @@ export class AgentRuntime {
       });
 
       // PLAN: Intent Started
-      this.bus.publish({
+      this.publish({
           type: "kairo.intent.started",
           source: "agent:" + this.id,
           data: { intent: thought },
@@ -318,7 +335,7 @@ export class AgentRuntime {
 
       if (action.type === 'say' || action.type === 'query') {
           // ACT: Publish Action Event
-          actionEventId = await this.bus.publish({
+          actionEventId = await this.publish({
               type: "kairo.agent.action",
               source: "agent:" + this.id,
               data: { action },
@@ -328,7 +345,7 @@ export class AgentRuntime {
           actionResult = "Displayed to user";
           
           // MEMORIZE: Intent Ended (Immediate)
-          this.bus.publish({
+          this.publish({
               type: "kairo.intent.ended",
               source: "agent:" + this.id,
               data: { result: actionResult },
@@ -342,7 +359,7 @@ export class AgentRuntime {
               const errorMsg = "Invalid tool_call action: missing function name";
               console.error("[AgentRuntime]", errorMsg, action);
               
-              this.bus.publish({
+              this.publish({
                  type: "kairo.tool.result",
                  source: "system", 
                  data: { error: errorMsg },
@@ -351,7 +368,7 @@ export class AgentRuntime {
               });
 
               // Intent Ended with Error
-              this.bus.publish({
+              this.publish({
                   type: "kairo.intent.ended",
                   source: "agent:" + this.id,
                   data: { error: errorMsg },
@@ -361,7 +378,7 @@ export class AgentRuntime {
               
           } else {
               // ACT: Publish Action Event
-              actionEventId = await this.bus.publish({
+              actionEventId = await this.publish({
                   type: "kairo.agent.action",
                   source: "agent:" + this.id,
                   data: { action },
@@ -381,7 +398,7 @@ export class AgentRuntime {
                  }
                  
                  // Publish standardized result event
-                 this.bus.publish({
+                 this.publish({
                      type: "kairo.tool.result",
                      source: "tool:" + action.function.name,
                      data: { result: actionResult },
@@ -390,7 +407,7 @@ export class AgentRuntime {
                  });
 
                  // MEMORIZE: Intent Ended (Success)
-                 this.bus.publish({
+                 this.publish({
                      type: "kairo.intent.ended",
                      source: "agent:" + this.id,
                      data: { result: actionResult },
@@ -401,7 +418,7 @@ export class AgentRuntime {
               } catch (e: any) {
                  actionResult = `Tool call failed: ${e.message}`;
 
-                 this.bus.publish({
+                 this.publish({
                      type: "kairo.tool.result",
                      source: "tool:" + action.function.name,
                      data: { error: e.message },
@@ -410,7 +427,7 @@ export class AgentRuntime {
                  });
 
                  // MEMORIZE: Intent Ended (Failure)
-                 this.bus.publish({
+                 this.publish({
                      type: "kairo.intent.ended",
                      source: "agent:" + this.id,
                      data: { error: e.message },
@@ -601,7 +618,19 @@ Or if no action is needed (waiting for user):
     }
   }
 
+  private async publish(payload: any) {
+    return this.bus.publish({
+        ...payload,
+        ...this.currentTraceContext
+    });
+  }
+
   private async dispatchToolCall(action: any, context: SystemToolContext): Promise<any> {
+    if (this.currentTraceContext) {
+        context.traceId = this.currentTraceContext.traceId;
+        context.spanId = randomUUID(); // New span for tool call
+    }
+
     const { name, arguments: args } = action.function;
     this.log(`Executing tool: ${name}`, args);
     

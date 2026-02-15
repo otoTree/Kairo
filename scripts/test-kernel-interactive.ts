@@ -20,7 +20,7 @@ async function runTest() {
 
     // 2. Start IPC Server
     console.log('[Test] Starting IPC Server...');
-    const server = new IPCServer(processManager, systemMonitor, deviceRegistry, TEST_SOCKET_PATH);
+    const server = new IPCServer(processManager, systemMonitor, deviceRegistry, undefined, TEST_SOCKET_PATH);
     await server.start();
 
     // 3. Start IPC Client

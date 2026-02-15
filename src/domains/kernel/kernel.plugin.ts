@@ -9,6 +9,7 @@ import { IPCServer } from "./ipc-server";
 import type { AgentPlugin } from "../agent/agent.plugin";
 
 import { Vault } from "../vault/vault";
+import { rootLogger } from "../observability/logger";
 
 export class KernelPlugin implements Plugin {
   name = "kernel";
@@ -40,7 +41,7 @@ export class KernelPlugin implements Plugin {
         const vault = app.getService<Vault>("vault");
         this.ipcServer.setVault(vault);
     } catch (e) {
-        console.warn("[Kernel] Vault service not available.");
+        rootLogger.warn("[Kernel] Vault service not available.");
     }
 
     this.registerTools();
@@ -59,7 +60,7 @@ export class KernelPlugin implements Plugin {
     try {
         await this.ipcServer.start();
     } catch (e) {
-        console.error("[Kernel] Failed to start IPC Server:", e);
+        rootLogger.error("[Kernel] Failed to start IPC Server:", e);
     }
 
     // Start System Monitor Polling
@@ -76,13 +77,13 @@ export class KernelPlugin implements Plugin {
       );
   
       this.bridge.start();
-      console.log("[Kernel] Started Event Bridge");
+      rootLogger.info("[Kernel] Started Event Bridge");
 
       // Register System Tools
       this.registerTerminalTools(agentPlugin);
 
     } catch (e) {
-      console.warn("[Kernel] AgentPlugin not found. Event Bridge & Tools disabled.");
+      rootLogger.warn("[Kernel] AgentPlugin not found. Event Bridge & Tools disabled.");
     }
   }
 
@@ -117,12 +118,17 @@ export class KernelPlugin implements Plugin {
         },
         required: ["sessionId", "command"]
       }
-    }, async (args) => {
+    }, async (args, context) => {
       const session = this.shellManager.getSession(args.sessionId);
       if (!session) {
         throw new Error(`Session ${args.sessionId} not found. Create one first.`);
       }
-      return await session.exec(args.command, args.timeout);
+      
+      const env: Record<string, string> = {};
+      if (context.traceId) env['KAIRO_TRACE_ID'] = context.traceId;
+      if (context.spanId) env['KAIRO_SPAN_ID'] = context.spanId;
+      
+      return await session.exec(args.command, { timeout: args.timeout, env });
     });
 
     // 3. kairo_terminal_list
@@ -148,6 +154,6 @@ export class KernelPlugin implements Plugin {
       return { status: "killed" };
     });
     
-    console.log("[Kernel] Registered Terminal Tools");
+    rootLogger.info("[Kernel] Registered Terminal Tools");
   }
 }

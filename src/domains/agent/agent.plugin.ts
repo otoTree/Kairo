@@ -44,7 +44,7 @@ export class AgentPlugin implements Plugin {
     this.systemTools.push(tool);
     // Dynamically add to existing agents
     for (const agent of this.agents.values()) {
-        agent.addSystemTool(tool);
+        agent.registerSystemTool(definition, handler);
     }
   }
 

@@ -14,6 +14,7 @@ import { KernelPlugin } from "./domains/kernel/kernel.plugin";
 import { DevicePlugin } from "./domains/device/device.plugin";
 import { MemoryPlugin } from "./domains/memory/memory.plugin";
 import { VaultPlugin } from "./domains/vault/vault.plugin";
+import { ObservabilityPlugin } from "./domains/observability/observability.plugin";
 import path from "path";
 
 const app = new Application();
@@ -96,6 +97,9 @@ async function bootstrap() {
 
     // Setup Skills
     await app.use(new SkillsPlugin(SKILLS_DIR));
+
+    // Setup Observability
+    await app.use(new ObservabilityPlugin());
 
     // Setup Server
     const server = new ServerPlugin(

@@ -123,7 +123,9 @@ export class ShellSession extends EventEmitter {
   /**
    * Execute a command in the shell session and wait for it to complete.
    */
-  async exec(command: string, timeout: number = 30000): Promise<CommandResult> {
+  async exec(command: string, options: { timeout?: number, env?: Record<string, string> } = {}): Promise<CommandResult> {
+    const timeout = options.timeout || 30000;
+
     if (this.isBusy) {
       throw new Error("Shell session is busy executing another command.");
     }
@@ -156,10 +158,14 @@ export class ShellSession extends EventEmitter {
       };
 
       // Construct command with sentinel
-      // We use brace expansion or just semicolon to ensure echo runs
-      // But we need to handle syntax errors in command.
+      // Inject env vars as prefix: KEY=VAL command
+      let prefix = "";
+      if (options.env) {
+          prefix = Object.entries(options.env).map(([k, v]) => `${k}="${v}"`).join(" ") + " ";
+      }
+
       // "command; echo SENTINEL $?" ensures echo runs even if command fails.
-      const cmdSequence = `${command}\n echo "${this.sentinel} $?"\n`;
+      const cmdSequence = `${prefix}${command}\n echo "${this.sentinel} $?"\n`;
       
       // Bun FileSink casting
     const stdin = this.process.stdin as any; 

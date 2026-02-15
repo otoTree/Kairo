@@ -19,6 +19,10 @@ export interface KairoEvent<T = unknown> {
   correlationId?: string;
   // Causation ID (ID of the event that caused this one)
   causationId?: string;
+  // Trace ID (global unique ID for the entire request chain)
+  traceId?: string;
+  // Span ID (unique ID for the current processing unit)
+  spanId?: string;
 }
 
 export type EventHandler<T = any> = (event: KairoEvent<T>) => void | Promise<void>;

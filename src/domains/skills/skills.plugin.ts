@@ -224,12 +224,12 @@ export class SkillsPlugin implements Plugin {
 
           const agent = this.agentPlugin?.getAgent(context.agentId);
           if (agent) {
-              agent.addSystemTool({
-                  definition: scriptTool as any,
-                  handler: async (args: any) => {
+              agent.registerSystemTool(
+                  scriptTool as any,
+                  async (args: any) => {
                       return await this.runSkillScript(args);
                   }
-              });
+              );
               response += `\n\n**Scripts available:** You can use \`run_skill_script\` to execute scripts in this skill.`;
           }
       }
