@@ -8,7 +8,8 @@ import type { DeviceRegistry } from '../device/registry';
 export class IPCServer {
   private socketPath: string;
   private server: any; // Bun server instance
-  private connections = new Map<Socket, Buffer>();
+  private connections = new Set<Socket>();
+  private buffers = new Map<Socket, Buffer>();
 
   constructor(
     private processManager: ProcessManager,
@@ -17,6 +18,17 @@ export class IPCServer {
     socketPath: string = '/tmp/kairo-kernel.sock'
   ) {
     this.socketPath = socketPath;
+    this.setupProcessEvents();
+  }
+
+  private setupProcessEvents() {
+    this.processManager.on('output', ({ id, type, data }) => {
+        this.broadcast(PacketType.STREAM_CHUNK, { id, stream: type, data });
+    });
+
+    this.processManager.on('exit', ({ id, code }) => {
+        this.broadcast(PacketType.EVENT, { topic: 'process.exit', data: { id, code } });
+    });
   }
 
   async start() {
@@ -35,15 +47,18 @@ export class IPCServer {
         },
         open: (socket) => {
           console.log('[IPC] Client connected');
-          this.connections.set(socket, Buffer.alloc(0));
+          this.connections.add(socket);
+          this.buffers.set(socket, Buffer.alloc(0));
         },
         close: (socket) => {
           console.log('[IPC] Client disconnected');
           this.connections.delete(socket);
+          this.buffers.delete(socket);
         },
         error: (socket, error) => {
            console.error('[IPC] Socket error:', error);
            this.connections.delete(socket);
+           this.buffers.delete(socket);
         }
       },
     });
@@ -52,7 +67,7 @@ export class IPCServer {
   }
 
   private handleData(socket: Socket, data: Buffer) {
-    let buffer = this.connections.get(socket) || Buffer.alloc(0);
+    let buffer = this.buffers.get(socket) || Buffer.alloc(0);
     buffer = Buffer.concat([buffer, data]);
     
     try {
@@ -70,11 +85,11 @@ export class IPCServer {
       socket.close(); // Close on protocol error
     }
     
-    this.connections.set(socket, buffer);
+    this.buffers.set(socket, buffer);
   }
 
   private async processPacket(socket: Socket, packet: Packet) {
-    console.log('[IPC] Received packet:', packet);
+    // console.log('[IPC] Received packet:', packet);
     
     if (packet.type === PacketType.REQUEST) {
        const { id, method, params } = packet.payload;
@@ -97,6 +112,18 @@ export class IPCServer {
                 if (!params?.id) throw new Error('Missing params: id');
                 this.processManager.kill(params.id);
                 result = { status: 'killed', id: params.id };
+                break;
+            
+            case 'process.stdin.write':
+                if (!params?.id || params?.data === undefined) throw new Error('Missing params: id, data');
+                this.processManager.writeToStdin(params.id, params.data);
+                result = { status: 'written', id: params.id };
+                break;
+
+            case 'process.wait':
+                if (!params?.id) throw new Error('Missing params: id');
+                const exitCode = await this.processManager.wait(params.id);
+                result = { status: 'exited', id: params.id, exitCode };
                 break;
 
             case 'process.pause':
@@ -133,10 +160,23 @@ export class IPCServer {
     }
   }
 
+  private broadcast(type: PacketType, payload: any) {
+      const packet = Protocol.encode(type, payload);
+      for (const socket of this.connections) {
+          try {
+              socket.write(packet);
+          } catch (e) {
+              console.error('[IPC] Broadcast error:', e);
+              this.connections.delete(socket);
+          }
+      }
+  }
+
   stop() {
     if (this.server) {
       this.server.stop();
       this.connections.clear();
+      this.buffers.clear();
     }
   }
 }

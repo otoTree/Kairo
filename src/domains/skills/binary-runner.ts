@@ -1,4 +1,5 @@
 import { ProcessManager } from '../kernel/process-manager';
+import type { SandboxRuntimeConfig } from '../sandbox/sandbox-config';
 
 export class BinaryRunner {
   constructor(private processManager: ProcessManager) {}
@@ -9,8 +10,17 @@ export class BinaryRunner {
    * @param binaryPath 二进制文件绝对路径
    * @param args 启动参数
    * @param env 环境变量
+   * @param context 追踪上下文
+   * @param sandboxConfig 沙箱配置
    */
-  async run(skillName: string, binaryPath: string, args: string[] = [], env: Record<string, string> = {}) {
+  async run(
+    skillName: string, 
+    binaryPath: string, 
+    args: string[] = [], 
+    env: Record<string, string> = {}, 
+    context?: { correlationId?: string, causationId?: string },
+    sandboxConfig?: SandboxRuntimeConfig
+  ) {
     const id = `skill-${skillName}-${Date.now()}`;
     
     console.log(`[BinaryRunner] Starting ${skillName} from ${binaryPath}`);
@@ -19,8 +29,11 @@ export class BinaryRunner {
       env: {
         ...env,
         KAIRO_SKILL_NAME: skillName,
-        KAIRO_IPC_SOCKET: '/tmp/kairo-kernel.sock', // Inject default IPC path
-      }
+        KAIRO_IPC_SOCKET: '/tmp/kairo-kernel.sock',
+        ...(context?.correlationId ? { KAIRO_CORRELATION_ID: context.correlationId } : {}),
+        ...(context?.causationId ? { KAIRO_CAUSATION_ID: context.causationId } : {}),
+      },
+      sandbox: sandboxConfig
     });
 
     return id;

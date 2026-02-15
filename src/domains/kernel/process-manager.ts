@@ -1,6 +1,9 @@
 import { spawn, type Subprocess } from 'bun';
 import { SandboxManager } from '../sandbox/sandbox-manager';
 import { quote } from 'shell-quote';
+import { EventEmitter } from 'node:events';
+
+import { SandboxRuntimeConfig } from '../sandbox/sandbox-config';
 
 export interface ProcessOptions {
   cwd?: string;
@@ -9,9 +12,10 @@ export interface ProcessOptions {
     cpu?: number;
     memory?: number;
   };
+  sandbox?: SandboxRuntimeConfig;
 }
 
-export class ProcessManager {
+export class ProcessManager extends EventEmitter {
   private processes = new Map<string, Subprocess>();
   private pidMap = new Map<string, number>();
 
@@ -20,19 +24,16 @@ export class ProcessManager {
     let shellMode = false;
 
     // Apply Sandbox / Limits
-    // If limits are present OR if we want to enforce sandbox (we can check if sandbox is configured)
-    // For now, we prioritize limits as requested.
-    if (options.limits) {
+    if (options.limits || options.sandbox) {
        const cmdString = quote(command);
        
-       const resourceLimits = {
+       const resourceLimits = options.limits ? {
            memory: options.limits.memory,
            cpu: options.limits.cpu
-       };
+       } : undefined;
 
-       const wrapped = await SandboxManager.wrapWithSandbox(cmdString, undefined, resourceLimits);
+       const wrapped = await SandboxManager.wrapWithSandbox(cmdString, options.sandbox, resourceLimits);
        
-       // wrapWithSandbox returns the command string unchanged if no sandbox/limits needed
        if (wrapped !== cmdString) {
            finalCommand = ['/bin/sh', '-c', wrapped];
            shellMode = true;
@@ -51,16 +52,67 @@ export class ProcessManager {
     this.pidMap.set(id, proc.pid);
     
     console.log(`[ProcessManager] Spawned process ${id} (PID: ${proc.pid})`);
+
+    // Handle stdout
+    if (proc.stdout) {
+      this.streamToEvent(id, 'stdout', proc.stdout);
+    }
+
+    // Handle stderr
+    if (proc.stderr) {
+      this.streamToEvent(id, 'stderr', proc.stderr);
+    }
+
+    // Handle exit
+    proc.exited.then((code) => {
+        this.emit('exit', { id, code });
+        this.cleanup(id);
+    });
+  }
+
+  private async streamToEvent(id: string, type: 'stdout' | 'stderr', stream: ReadableStream) {
+    const reader = stream.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        this.emit('output', { id, type, data: value });
+      }
+    } catch (error) {
+      console.error(`[ProcessManager] Error reading ${type} for process ${id}:`, error);
+    }
+  }
+
+  writeToStdin(id: string, data: string | Buffer | Uint8Array): void {
+    const proc = this.processes.get(id);
+    if (proc && proc.stdin) {
+      proc.stdin.write(data);
+      proc.stdin.flush();
+    } else {
+      throw new Error(`Process ${id} not found or stdin not available`);
+    }
+  }
+
+  async wait(id: string): Promise<number> {
+    const proc = this.processes.get(id);
+    if (!proc) {
+       throw new Error(`Process ${id} not found`);
+    }
+    return await proc.exited;
   }
 
   kill(id: string): void {
     const proc = this.processes.get(id);
     if (proc) {
       proc.kill();
-      this.processes.delete(id);
-      this.pidMap.delete(id);
+      this.cleanup(id);
       console.log(`[ProcessManager] Killed process ${id}`);
     }
+  }
+
+  private cleanup(id: string) {
+    this.processes.delete(id);
+    this.pidMap.delete(id);
   }
 
   pause(id: string): boolean {

@@ -3,6 +3,7 @@ import { Application } from "../../core/app";
 import { AgentPlugin } from "../agent/agent.plugin";
 import { SkillRegistry } from "./registry";
 import { SandboxManager } from "../sandbox/sandbox-manager";
+import type { SandboxRuntimeConfig } from "../sandbox/sandbox-config";
 import { ProcessManager } from "../kernel/process-manager";
 import { BinaryRunner } from "./binary-runner";
 import path from "path";
@@ -113,7 +114,7 @@ export class SkillsPlugin implements Plugin {
       return matches.map(s => `- **${s.name}**: ${s.description}`).join("\n");
   }
 
-  async equipSkill(skillName: string, context: { agentId: string }) {
+  async equipSkill(skillName: string, context: { agentId: string, correlationId?: string, causationId?: string }) {
       const skill = this.registry.getSkill(skillName);
       if (!skill) {
           throw new Error(`Skill ${skillName} not found.`);
@@ -122,10 +123,42 @@ export class SkillsPlugin implements Plugin {
       await this.agentPlugin?.globalBus.publish({
           type: "kairo.skill.equipped",
           source: "system:skills",
-          data: { agentId: context.agentId, skillName }
+          data: { agentId: context.agentId, skillName },
+          correlationId: context.correlationId,
+          causationId: context.causationId
       });
 
       let response = `## Skill: ${skill.name}\n\n${skill.content}`;
+
+      // Build Sandbox Config from Manifest Permissions
+      const sandboxConfig: SandboxRuntimeConfig = {
+          network: {
+              allowedDomains: [],
+              deniedDomains: [],
+          },
+          filesystem: {
+              denyRead: [],
+              allowWrite: [],
+              denyWrite: []
+          }
+      };
+
+      if (skill.manifest?.permissions) {
+          for (const perm of skill.manifest.permissions) {
+              if (perm.scope === 'network' && perm.request === 'connect') {
+                  if (perm.criteria?.host) {
+                      sandboxConfig.network.allowedDomains.push(perm.criteria.host);
+                  }
+              }
+              if (perm.scope === 'kernel') {
+                  if (perm.request === 'fs:write' && perm.criteria?.path) {
+                      sandboxConfig.filesystem.allowWrite.push(perm.criteria.path);
+                  }
+                  // fs:read we can't enforce allow-list yet with current config schema
+                  // But we can interpret fs:read as "don't deny this" if we had a default deny
+              }
+          }
+      }
 
       // Binary Startup (V2 Manifest)
       if (skill.manifest?.artifacts?.binaries) {
@@ -136,7 +169,7 @@ export class SkillsPlugin implements Plugin {
               const binaryPath = path.resolve(skill.path, binaryRelPath);
               try {
                   await fs.access(binaryPath);
-                  const pid = await this.binaryRunner.run(skill.name, binaryPath);
+                  const pid = await this.binaryRunner.run(skill.name, binaryPath, [], {}, context, sandboxConfig);
                   response += `\n\n**Binary Started:** Background process started with ID \`${pid}\`.`;
               } catch (e) {
                   console.error(`Failed to start binary for skill ${skill.name}:`, e);

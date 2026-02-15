@@ -303,13 +303,14 @@ function isSandboxingEnabled(): boolean {
 }
 
 
-function getFsReadConfig(): FsReadRestrictionConfig {
-  if (!config) {
+function getFsReadConfig(runtimeConfig?: SandboxRuntimeConfig): FsReadRestrictionConfig {
+  const cfg = runtimeConfig || config;
+  if (!cfg) {
     return { denyOnly: [] }
   }
 
   // Filter out glob patterns on Linux
-  const denyPaths = config.filesystem.denyRead
+  const denyPaths = cfg.filesystem.denyRead
     .map(path => removeTrailingGlobSuffix(path))
     .filter(path => {
       if (getPlatform() === 'linux' && containsGlobChars(path)) {
@@ -324,13 +325,14 @@ function getFsReadConfig(): FsReadRestrictionConfig {
   }
 }
 
-function getFsWriteConfig(): FsWriteRestrictionConfig {
-  if (!config) {
+function getFsWriteConfig(runtimeConfig?: SandboxRuntimeConfig): FsWriteRestrictionConfig {
+  const cfg = runtimeConfig || config;
+  if (!cfg) {
     return { allowOnly: getDefaultWritePaths(), denyWithinAllow: [] }
   }
 
   // Filter out glob patterns on Linux for allowWrite
-  const allowPaths = config.filesystem.allowWrite
+  const allowPaths = cfg.filesystem.allowWrite
     .map(path => removeTrailingGlobSuffix(path))
     .filter(path => {
       if (getPlatform() === 'linux' && containsGlobChars(path)) {
@@ -341,7 +343,7 @@ function getFsWriteConfig(): FsWriteRestrictionConfig {
     })
 
   // Filter out glob patterns on Linux for denyWrite
-  const denyPaths = config.filesystem.denyWrite
+  const denyPaths = cfg.filesystem.denyWrite
     .map(path => removeTrailingGlobSuffix(path))
     .filter(path => {
       if (getPlatform() === 'linux' && containsGlobChars(path)) {
@@ -360,13 +362,14 @@ function getFsWriteConfig(): FsWriteRestrictionConfig {
   }
 }
 
-function getNetworkRestrictionConfig(): NetworkRestrictionConfig {
-  if (!config) {
+function getNetworkRestrictionConfig(runtimeConfig?: SandboxRuntimeConfig): NetworkRestrictionConfig {
+  const cfg = runtimeConfig || config;
+  if (!cfg) {
     return {}
   }
 
-  const allowedHosts = config.network.allowedDomains
-  const deniedHosts = config.network.deniedDomains
+  const allowedHosts = cfg.network.allowedDomains
+  const deniedHosts = cfg.network.deniedDomains
 
   return {
     ...(allowedHosts.length > 0 && { allowedHosts }),
@@ -374,28 +377,28 @@ function getNetworkRestrictionConfig(): NetworkRestrictionConfig {
   }
 }
 
-function getAllowUnixSockets(): string[] | undefined {
-  return config?.network?.allowUnixSockets
+function getAllowUnixSockets(runtimeConfig?: SandboxRuntimeConfig): string[] | undefined {
+  return (runtimeConfig || config)?.network?.allowUnixSockets
 }
 
-function getAllowAllUnixSockets(): boolean | undefined {
-  return config?.network?.allowAllUnixSockets
+function getAllowAllUnixSockets(runtimeConfig?: SandboxRuntimeConfig): boolean | undefined {
+  return (runtimeConfig || config)?.network?.allowAllUnixSockets
 }
 
-function getAllowLocalBinding(): boolean | undefined {
-  return config?.network?.allowLocalBinding
+function getAllowLocalBinding(runtimeConfig?: SandboxRuntimeConfig): boolean | undefined {
+  return (runtimeConfig || config)?.network?.allowLocalBinding
 }
 
-function getIgnoreViolations(): Record<string, string[]> | undefined {
-  return config?.ignoreViolations
+function getIgnoreViolations(runtimeConfig?: SandboxRuntimeConfig): Record<string, string[]> | undefined {
+  return (runtimeConfig || config)?.ignoreViolations
 }
 
-function getEnableWeakerNestedSandbox(): boolean | undefined {
-  return config?.enableWeakerNestedSandbox
+function getEnableWeakerNestedSandbox(runtimeConfig?: SandboxRuntimeConfig): boolean | undefined {
+  return (runtimeConfig || config)?.enableWeakerNestedSandbox
 }
 
-function getFallbackWorkDir(): string | undefined {
-  return config?.fallbackWorkDir
+function getFallbackWorkDir(runtimeConfig?: SandboxRuntimeConfig): string | undefined {
+  return (runtimeConfig || config)?.fallbackWorkDir
 }
 
 function getProxyPort(): number | undefined {
@@ -435,17 +438,22 @@ async function waitForNetworkInitialization(): Promise<boolean> {
 
 async function wrapWithSandbox(
   command: string,
-  binShell?: string,
+  runtimeConfig?: SandboxRuntimeConfig,
   resourceLimits?: ResourceLimitsConfig,
+  binShell?: string,
 ): Promise<string> {
   // If no config and no limits, return command as-is
-  if (!config && !resourceLimits) {
+  const cfg = runtimeConfig || config;
+  if (!cfg && !resourceLimits) {
     return command
   }
 
   const platform = getPlatform()
 
-  // Wait for network initialization
+  // Wait for network initialization (only if using global config or if we want to reuse global proxies)
+  // For now, even with custom config, we reuse global proxies if they are running.
+  // If custom config has different proxy settings, this might be incorrect, but starting new proxies per process is complex.
+  // We assume runtimeConfig inherits network infrastructure or we need to start it.
   await waitForNetworkInitialization()
 
   switch (platform) {
@@ -454,13 +462,13 @@ async function wrapWithSandbox(
         command,
         httpProxyPort: getProxyPort(),
         socksProxyPort: getSocksProxyPort(),
-        readConfig: getFsReadConfig(),
-        writeConfig: getFsWriteConfig(),
+        readConfig: getFsReadConfig(cfg),
+        writeConfig: getFsWriteConfig(cfg),
         needsNetworkRestriction: true,
-        allowUnixSockets: getAllowUnixSockets(),
-        allowAllUnixSockets: getAllowAllUnixSockets(),
-        allowLocalBinding: getAllowLocalBinding(),
-        ignoreViolations: getIgnoreViolations(),
+        allowUnixSockets: getAllowUnixSockets(cfg),
+        allowAllUnixSockets: getAllowAllUnixSockets(cfg),
+        allowLocalBinding: getAllowLocalBinding(cfg),
+        ignoreViolations: getIgnoreViolations(cfg),
         binShell,
         resourceLimits,
       })
@@ -474,12 +482,12 @@ async function wrapWithSandbox(
         socksSocketPath: getLinuxSocksSocketPath(),
         httpProxyPort: managerContext?.httpProxyPort,
         socksProxyPort: managerContext?.socksProxyPort,
-        readConfig: getFsReadConfig(),
-        writeConfig: getFsWriteConfig(),
-        enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(),
-        allowAllUnixSockets: getAllowAllUnixSockets(),
+        readConfig: getFsReadConfig(cfg),
+        writeConfig: getFsWriteConfig(cfg),
+        enableWeakerNestedSandbox: getEnableWeakerNestedSandbox(cfg),
+        allowAllUnixSockets: getAllowAllUnixSockets(cfg),
         binShell,
-        fallbackWorkDir: getFallbackWorkDir(),
+        fallbackWorkDir: getFallbackWorkDir(cfg),
         resourceLimits,
       })
 
@@ -679,10 +687,11 @@ function annotateStderrWithSandboxFailures(
  *
  * Patterns ending with /** are excluded since they work as subpaths.
  */
-function getLinuxGlobPatternWarnings(): string[] {
+function getLinuxGlobPatternWarnings(runtimeConfig?: SandboxRuntimeConfig): string[] {
   // Only warn on Linux
   // macOS supports glob patterns via regex conversion
-  if (getPlatform() !== 'linux' || !config) {
+  const cfg = runtimeConfig || config;
+  if (getPlatform() !== 'linux' || !cfg) {
     return []
   }
 
@@ -690,9 +699,9 @@ function getLinuxGlobPatternWarnings(): string[] {
 
   // Check filesystem paths for glob patterns
   const allPaths = [
-    ...config.filesystem.denyRead,
-    ...config.filesystem.allowWrite,
-    ...config.filesystem.denyWrite,
+    ...cfg.filesystem.denyRead,
+    ...cfg.filesystem.allowWrite,
+    ...cfg.filesystem.denyWrite,
   ]
 
   for (const path of allPaths) {
@@ -734,7 +743,7 @@ export type ISandboxManager = {
   getLinuxHttpSocketPath(): string | undefined
   getLinuxSocksSocketPath(): string | undefined
   waitForNetworkInitialization(): Promise<boolean>
-  wrapWithSandbox(command: string, binShell?: string, resourceLimits?: ResourceLimitsConfig): Promise<string>
+  wrapWithSandbox(command: string, runtimeConfig?: SandboxRuntimeConfig, resourceLimits?: ResourceLimitsConfig, binShell?: string): Promise<string>
   getSandboxViolationStore(): SandboxViolationStore
   annotateStderrWithSandboxFailures(command: string, stderr: string): string
   getLinuxGlobPatternWarnings(): string[]

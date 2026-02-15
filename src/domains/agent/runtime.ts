@@ -8,6 +8,8 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export interface SystemToolContext {
   agentId: string;
+  correlationId?: string;
+  causationId?: string;
 }
 
 export interface SystemTool {
@@ -256,6 +258,11 @@ export class AgentRuntime {
     const systemPrompt = await this.getSystemPrompt(context, toolsContext);
     const userPrompt = this.composeUserPrompt(observations);
     
+    // Determine context for tracing
+    const triggerEvent = events[events.length - 1];
+    const causationId = triggerEvent?.id;
+    const correlationId = triggerEvent?.correlationId || causationId;
+
     this.log(`Tick #${this.tickCount} processing...`);
     this.log(`Input Prompt:`, { system: systemPrompt, user: userPrompt });
 
@@ -280,7 +287,9 @@ export class AgentRuntime {
       this.bus.publish({
           type: "kairo.agent.thought",
           source: "agent:" + this.id,
-          data: { thought }
+          data: { thought },
+          correlationId,
+          causationId
       });
 
       let actionResult = null;
@@ -291,7 +300,9 @@ export class AgentRuntime {
           actionEventId = await this.bus.publish({
               type: "kairo.agent.action",
               source: "agent:" + this.id,
-              data: { action }
+              data: { action },
+              correlationId,
+              causationId
           });
           actionResult = "Displayed to user";
       } else if (action.type === 'tool_call' && this.mcp) {
@@ -307,7 +318,8 @@ export class AgentRuntime {
                  type: "kairo.tool.result",
                  source: "system", // System error
                  data: { error: errorMsg },
-                 causationId: actionEventId
+                 causationId: actionEventId || causationId, // Fallback if actionEventId not created
+                 correlationId
               });
               
               // Skip execution
@@ -316,13 +328,15 @@ export class AgentRuntime {
               actionEventId = await this.bus.publish({
                   type: "kairo.agent.action",
                   source: "agent:" + this.id,
-                  data: { action }
+                  data: { action },
+                  correlationId,
+                  causationId
               });
               
               this.pendingActions.add(actionEventId);
 
               try {
-                 actionResult = await this.dispatchToolCall(action);
+                 actionResult = await this.dispatchToolCall(action, { agentId: this.id, correlationId, causationId: actionEventId });
                  if (this.onActionResult) {
                      this.onActionResult({
                          action,
@@ -335,7 +349,8 @@ export class AgentRuntime {
                      type: "kairo.tool.result",
                      source: "tool:" + action.function.name,
                      data: { result: actionResult },
-                     causationId: actionEventId
+                     causationId: actionEventId,
+                     correlationId
                  });
 
               } catch (e: any) {
@@ -345,7 +360,8 @@ export class AgentRuntime {
                      type: "kairo.tool.result",
                      source: "tool:" + action.function.name,
                      data: { error: e.message },
-                     causationId: actionEventId
+                     causationId: actionEventId,
+                     correlationId
                  });
               }
           }
@@ -528,7 +544,7 @@ Or if no action is needed (waiting for user):
     }
   }
 
-  private async dispatchToolCall(action: any): Promise<any> {
+  private async dispatchToolCall(action: any, context: SystemToolContext): Promise<any> {
     const { name, arguments: args } = action.function;
     this.log(`Executing tool: ${name}`, args);
     
@@ -539,7 +555,7 @@ Or if no action is needed (waiting for user):
     // Check System Tools first
     if (this.systemTools.has(name)) {
         try {
-            return await this.systemTools.get(name)!.handler(args, { agentId: this.id });
+            return await this.systemTools.get(name)!.handler(args, context);
         } catch (e: any) {
              throw new Error(`System tool execution failed: ${e.message}`);
         }
