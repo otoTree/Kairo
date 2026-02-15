@@ -120,6 +120,14 @@ export class KairoClient {
             console.warn('KairoClient: WebSocket not connected, cannot send message');
         }
     }
+
+    sendRaw(payload: any) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify(payload));
+        } else {
+            console.warn('KairoClient: WebSocket not connected, cannot send message');
+        }
+    }
 }
 
 export const kairoClient = new KairoClient();

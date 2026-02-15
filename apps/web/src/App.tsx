@@ -5,8 +5,10 @@ import { kairoClient } from './lib/kairo-client'
 import { cn } from './lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { SendHorizontal, Sparkles, Terminal, Bot, User, BrainCircuit, Wrench, ChevronRight } from 'lucide-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { SendHorizontal, Sparkles, Terminal, Bot, User, Wrench, ChevronRight } from 'lucide-react'
+
+import { Compositor } from './components/compositor/Compositor'
 
 interface Message {
   id: string;
@@ -351,6 +353,7 @@ function App() {
                 </div>
              </div>
         </main>
+        <Compositor />
     </div>
   )
 }

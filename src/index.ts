@@ -15,6 +15,7 @@ import { DevicePlugin } from "./domains/device/device.plugin";
 import { MemoryPlugin } from "./domains/memory/memory.plugin";
 import { VaultPlugin } from "./domains/vault/vault.plugin";
 import { ObservabilityPlugin } from "./domains/observability/observability.plugin";
+import { CompositorPlugin } from "./domains/ui/compositor.plugin";
 import path from "path";
 
 const app = new Application();
@@ -100,6 +101,9 @@ async function bootstrap() {
 
     // Setup Observability
     await app.use(new ObservabilityPlugin());
+
+    // Setup Compositor (UI/Wayland)
+    await app.use(new CompositorPlugin());
 
     // Setup Server
     const server = new ServerPlugin(

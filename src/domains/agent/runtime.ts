@@ -131,6 +131,9 @@ export class AgentRuntime {
     // Subscribe to tool results (standard)
     unsubs.push(this.bus.subscribe("kairo.tool.result", this.handleEvent.bind(this)));
 
+    // Subscribe to global user messages (Runtime filters by targetAgentId internally)
+    unsubs.push(this.bus.subscribe("kairo.user.message", this.handleEvent.bind(this)));
+
     // Subscribe to direct agent messages (Router handles user.message -> agent.ID.message)
     unsubs.push(this.bus.subscribe(`kairo.agent.${this.id}.message`, this.handleEvent.bind(this)));
 
@@ -353,6 +356,39 @@ export class AgentRuntime {
               causationId: actionEventId
           });
 
+      } else if (action.type === 'render') {
+          // ACT: Publish Action Event
+          actionEventId = await this.publish({
+              type: "kairo.agent.action",
+              source: "agent:" + this.id,
+              data: { action },
+              correlationId,
+              causationId
+          });
+          
+          // Publish Render Commit
+          await this.publish({
+            type: "kairo.agent.render.commit",
+            source: "agent:" + this.id,
+            data: {
+              surfaceId: action.surfaceId || "default",
+              tree: action.tree
+            },
+            correlationId,
+            causationId: actionEventId
+          });
+
+          actionResult = "UI Rendered";
+          
+          // MEMORIZE: Intent Ended (Immediate)
+          this.publish({
+              type: "kairo.intent.ended",
+              source: "agent:" + this.id,
+              data: { result: actionResult },
+              correlationId,
+              causationId: actionEventId
+          });
+
       } else if (action.type === 'tool_call') {
           // Validate action structure
           if (!action.function || !action.function.name) {
@@ -506,7 +542,7 @@ export class AgentRuntime {
           }
       }
 
-      const validActionTypes = ["say", "query", "noop"];
+      const validActionTypes = ["say", "query", "render", "noop"];
       if (toolsContext && toolsContext.trim().length > 0) {
           validActionTypes.push("tool_call");
       }
@@ -527,6 +563,11 @@ ${memoryContext}
 - You can read/write files.
 - You can use provided tools.
 - You can extend your capabilities by equipping Skills. Use \`kairo_search_skills\` to find skills and \`kairo_equip_skill\` to load them.
+- You can render native UI components using the 'render' action.
+  Supported Components:
+  - Containers: "Column" (vertical stack), "Row" (horizontal stack). Props: none.
+  - Basic: "Text" (props: text), "Button" (props: label, signals: clicked).
+  - Input: "TextInput" (props: placeholder, value, signals: textChanged).
 
 【Language Policy】
 You MUST respond in the same language as the user's input.
@@ -566,6 +607,22 @@ To ask the user a question:
 {
   "thought": "reasoning...",
   "action": { "type": "query", "content": "question to user" }
+}
+
+To render a UI:
+{
+  "thought": "reasoning...",
+  "action": {
+    "type": "render",
+    "surfaceId": "default",
+    "tree": {
+      "type": "Column",
+      "children": [
+        { "type": "Text", "props": { "text": "Hello" } },
+        { "type": "Button", "props": { "label": "Click Me" }, "signals": { "clicked": "slot_id" } }
+      ]
+    }
+  }
 }${toolsContext && toolsContext.trim().length > 0 ? `
 
 To use a tool:

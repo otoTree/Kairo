@@ -88,6 +88,12 @@ export class ServerPlugin implements Plugin {
                                 targetAgentId: data.agentId
                             }
                         });
+                    } else if (data.type === 'ui_signal') {
+                        this.agent.globalBus.publish({
+                            type: 'kairo.ui.signal',
+                            source: 'client:web',
+                            data: data.payload
+                        });
                     }
                 } catch (e) {
                     console.error("[Server] Failed to parse message", e);
@@ -128,6 +134,15 @@ export class ServerPlugin implements Plugin {
             });
 
             bus.subscribe("kairo.tool.result", (event) => {
+                this.broadcast(event);
+            });
+            
+            bus.subscribe("kairo.agent.render.commit", (event) => {
+                this.broadcast(event);
+            });
+
+            bus.subscribe("kairo.ui.signal", (event) => {
+                // Broadcast signals too, so multiple clients (if any) stay in sync
                 this.broadcast(event);
             });
             
