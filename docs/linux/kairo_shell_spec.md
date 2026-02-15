@@ -29,29 +29,27 @@
 
 ## 3. 核心架构 (Architecture)
 
-Kairo Shell 在 River 的基础上扩展了 Agent 交互层：
+Kairo Shell 基于 **River** 的架构进行扩展。由于 River 采用了 "Split Window Management" 设计（即将布局逻辑委托给外部进程），Kairo Shell 将由以下几个核心组件构成：
 
-### 3.1 River Core (Upstream)
-直接复用 River 的核心功能：
-*   **Window Management**: 强大的动态平铺 (Dynamic Tiling) 引擎。自动将 Agent 悬浮窗与应用窗口并排布局。
-*   **Hardware Abstraction**: 通过 wlroots 处理显卡和输入设备。
-*   **Tags & Outputs**: 多显示器支持和工作区管理。
-*   **XWayland Support**: 零配置支持运行 X11 应用。
+### 3.1 River Core (Forked)
 
-### 3.2 Kairo Extension (Customization)
-我们在 River 中注入 Kairo 特有的逻辑（作为 River 的内置模块或特权客户端）：
+为了支持 Kairo 特有的协议和渲染需求，我们将 Fork River 并进行必要的修改：
+*   **Compositor**: 负责 DRM/KMS 输出、输入设备管理、Wayland 协议处理。
+*   **KDP Server (Kairo Display Protocol)**: 在 River 内部实现 `kairo-display-v1` 协议服务端。
+    *   这是一个自定义 Wayland 扩展，允许 Agent Runtime 提交 UI 树。
+    *   River 将直接在 Overlay 层绘制这些 UI 元素（Agent Panel, Omni-box），确保其位于所有应用窗口之上。
+*   **Input Injection**: 利用 wlroots 提供的能力，实现 Agent 对键盘/鼠标的模拟控制。
 
-#### A. KDP Server (Agent UI 渲染)
-*   实现一个自定义的 Wayland 协议扩展 `kairo-display-v1`。
-*   Agent Runtime 通过该协议提交 UI 描述树 (Render Tree)。
-*   Shell 直接在 GPU 上绘制这些 UI 元素（作为 Overlay 或独立 Surface），无需启动浏览器。
+### 3.2 Kairo WM (Window Manager)
 
-#### B. Agent Layout Policy (布局策略)
-*   **AI 优先**: Agent 的窗口 (如对话框、工具面板) 具有特殊的布局权重。
-*   **Smart Tiling**: 当 Agent 打开一个应用（如 "打开 Firefox"）时，Shell 自动将屏幕分割，左边是 Agent 指令，右边是浏览器窗口。
+这是一个独立的 Zig 程序（或作为 River 的 init 进程启动），实现 `river-window-management-v1` 协议。它接管窗口布局逻辑：
+*   **Smart Tiling**: 实现“主副窗口”布局。Agent Panel 占据固定区域，应用窗口自动平铺在剩余空间。
+*   **Tag Management**: 自动将不同任务（Coding, Browsing）分配到不同的 Tag（工作区）。
 
-#### C. Input Injection
-*   Agent 可以通过 `input-method` 协议模拟键盘/鼠标输入，从而控制其他 Linux 应用（实现 "Computer Use" 能力）。
+### 3.3 数据流向
+
+1.  **Agent UI 渲染**: Kernel -> KDP Protocol -> River Core (Overlay Layer)。
+2.  **窗口布局控制**: Kernel -> IPC -> Kairo WM -> River Management Protocol -> River Core。
 
 ## 4. 交互模型 (Interaction Model)
 
@@ -71,19 +69,23 @@ Kairo Shell 在 River 的基础上扩展了 Agent 交互层：
 
 ## 5. 开发路线图 (Roadmap)
 
-### Phase 1: River 集成 (Hello River)
-*   [ ] 在 `os/` 中引入 River 源码作为依赖。
-*   [ ] 编写 `build.zig` 能够编译出原生的 `river` 二进制。
-*   [ ] 配置默认的 `init` 脚本 (rivertile)，确保启动后能看到鼠标和背景。
-*   [ ] 验证运行 `weston-terminal` 和 `firefox`。
+### Phase 1: River 基础集成
+*   [ ] Fork `riverwm/river` 到 `kairo-os/river`。
+*   [ ] 在 `os/` 目录中建立构建系统，确保能编译出原生的 `river` 二进制。
+*   [ ] 编写基础的 `init` 脚本，启动一个简单的布局管理器（如 rivertile），验证桌面可运行。
 
-### Phase 2: Kairo 协议扩展
-*   [ ] 定义 `kairo-display-v1.xml` Wayland 协议扩展。
-*   [ ] 在 River 中实现该协议的服务端逻辑 (Server-side implementation)。
-*   [ ] 修改 Agent Runtime，使其能作为 Wayland 客户端连接并发送 UI 树。
+### Phase 2: Kairo WM 开发
+*   [ ] 开发 `kairo-wm` (Zig)，实现 `river-window-management-v1` 协议。
+*   [ ] 实现基础的 Tiling 算法。
+*   [ ] 实现 IPC 接口，允许 Kernel 控制布局（如“将当前窗口移到右侧”）。
 
-### Phase 3: 深度融合
-*   [ ] 实现 "Smart Tiling"：Agent 自动管理窗口布局。
+### Phase 3: KDP 协议实现
+*   [ ] 定义 `kairo-display-v1.xml`。
+*   [ ] 修改 River 源码，注册并实现该协议。
+*   [ ] 实现 Overlay 渲染器，能够解析 JSON UI 树并绘制简单图形。
+
+### Phase 4: 深度融合
+*   [ ] 实现 "Smart Tiling"：当 Agent Panel 显示时，`kairo-wm` 自动调整布局区域。
 *   [ ] 实现 Agent 对应用的输入控制 (Computer Use API)。
 
 ## 6. 构建配置
@@ -95,6 +97,7 @@ Kairo Shell 在 River 的基础上扩展了 Agent 交互层：
 const river = b.dependency("river", .{
     .target = target,
     .optimize = optimize,
+    .xwayland = true, // 启用 XWayland 支持
 });
 b.installArtifact(river.artifact("river"));
 ```

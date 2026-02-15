@@ -14,6 +14,10 @@
     *   详细定义了 PID 1 (Zig) 的功能与职责。
 *   **[Kairo Shell (Zig) 功能规范](./kairo_shell_spec.md)** (`kairo_shell_spec.md`)
     *   详细定义了 Kairo 原生合成器 (Wayland Compositor) 的功能与职责。
+*   **[Kairo Window Manager 功能规范](./kairo_wm_spec.md)** (`kairo_wm_spec.md`)
+    *   详细定义了基于 river-window-management-v1 的窗口布局管理器。
+*   **[Shell & Kernel 交互规范](./shell_kernel_interaction_spec.md)** (`shell_kernel_interaction_spec.md`)
+    *   定义了 KDP (Display) 和 KCP (Control) 双通道通信协议。
 *   **[Kairo Kernel (TS) 功能规范](./ts_kernel_spec.md)** (`ts_kernel_spec.md`)
     *   详细定义了 Kernel (TypeScript) 的功能与职责。
 
