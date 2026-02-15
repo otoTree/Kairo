@@ -1,15 +1,23 @@
 import { SerialPort } from 'serialport';
-import type { SerialPort as ISerialPort } from '../protocols/serial';
+import { EventEmitter } from 'events';
+import type { IDeviceDriver } from './types';
 
-export class NativeSerialDriver implements ISerialPort {
+export class NativeSerialDriver extends EventEmitter implements IDeviceDriver {
+  public id: string;
+  public type: string = 'serial';
+  
   private port: SerialPort | null = null;
   private path: string;
 
-  constructor(path: string) {
+  constructor(deviceId: string, path: string) {
+    super();
+    this.id = deviceId;
     this.path = path;
   }
 
-  async open(baudRate: number): Promise<void> {
+  async connect(options?: { baudRate?: number }): Promise<void> {
+    const baudRate = options?.baudRate || 9600;
+    
     return new Promise((resolve, reject) => {
       this.port = new SerialPort({
         path: this.path,
@@ -24,13 +32,20 @@ export class NativeSerialDriver implements ISerialPort {
 
       // Forward data events
       this.port.on('data', (data) => {
-          // data is Buffer, compatible with Uint8Array
-          this.emitData(data);
+          this.emit('data', data);
+      });
+      
+      this.port.on('error', (err) => {
+          this.emit('error', err);
+      });
+      
+      this.port.on('close', () => {
+          this.emit('disconnected');
       });
     });
   }
 
-  async write(data: Uint8Array): Promise<void> {
+  async write(data: Buffer | string | Uint8Array): Promise<void> {
     if (!this.port || !this.port.isOpen) throw new Error('Port not open');
     
     return new Promise((resolve, reject) => {
@@ -46,42 +61,22 @@ export class NativeSerialDriver implements ISerialPort {
     });
   }
 
-  async read(length?: number): Promise<Uint8Array> {
-     // This is a bit tricky with event-based SerialPort.
-     // Typically we use 'data' event. If we need strict read(length), we need to buffer.
-     // For now, let's implement a simple one-shot read if data is available, or throw.
-     // But strictly speaking, serial ports are stream-based.
-     // The interface definition suggests `read` OR `on('data')`. 
-     // Let's rely on `on('data')` primarily.
-     throw new Error('Method not implemented. Use on("data") listener.');
-  }
-
-  async close(): Promise<void> {
+  async disconnect(): Promise<void> {
     if (!this.port) return;
     
     return new Promise((resolve, reject) => {
-      this.port!.close((err) => {
-        if (err) reject(err);
-        else {
-            this.port = null;
-            resolve();
-        }
-      });
-    });
-  }
-
-  private listeners: ((data: Uint8Array) => void)[] = [];
-
-  on(event: 'data', listener: (data: Uint8Array) => void): void {
-    if (event === 'data') {
-        this.listeners.push(listener);
-    }
-  }
-
-  private emitData(data: Buffer) {
-      const uint8 = new Uint8Array(data);
-      for (const listener of this.listeners) {
-          listener(uint8);
+      if (this.port?.isOpen) {
+        this.port.close((err) => {
+            if (err) reject(err);
+            else {
+                this.port = null;
+                resolve();
+            }
+        });
+      } else {
+          this.port = null;
+          resolve();
       }
+    });
   }
 }

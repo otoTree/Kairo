@@ -28,9 +28,29 @@ export class DeviceMonitor {
   }
 
   private async scanConnectedDevices() {
+    // Check for Mock Environment
+    if (process.platform === 'darwin' || process.env.KAIRO_MOCK_DEVICES === 'true') {
+        console.log('[DeviceMonitor] Using Mock Devices for development');
+        this.registry.register({
+            id: 'mock_serial_01',
+            type: 'serial',
+            path: '/dev/mock/ttyS0',
+            hardwareId: 'MOCK:SERIAL:01',
+            status: 'available',
+            owner: null,
+            metadata: {
+                description: 'Mock Serial Device',
+                mock: true
+            }
+        });
+        // We can return early or continue if we want mixed real/mock (unlikely on macos without drivers)
+        // return; 
+    }
+
     console.log('[DeviceMonitor] Skipping scanConnectedDevices because usb-detection is disabled');
     /*
     const devices = await new Promise<any[]>((resolve, reject) => {
+
         usbDetect.find((err, devices) => {
             if (err) reject(err);
             else resolve(devices);
@@ -75,6 +95,7 @@ export class DeviceMonitor {
               path: path,
               hardwareId: `${vid}:${pid}:${serialNumber || ''}`,
               status: 'available',
+              owner: null,
               metadata: {
                   ...usbDevice,
                   description: mapping.alias

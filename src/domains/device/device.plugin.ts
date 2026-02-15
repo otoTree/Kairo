@@ -2,10 +2,12 @@ import type { Plugin } from "../../core/plugin";
 import type { Application } from "../../core/app";
 import { DeviceMonitor } from "./monitor";
 import type { DeviceRegistry } from "./registry";
+import { DeviceManager } from "./manager";
 
 export class DevicePlugin implements Plugin {
   name = "device";
   private monitor?: DeviceMonitor;
+  private manager?: DeviceManager;
   private app?: Application;
 
   setup(app: Application): void {
@@ -27,6 +29,10 @@ export class DevicePlugin implements Plugin {
           this.monitor = new DeviceMonitor(registry);
           await this.monitor.start();
           console.log("[DevicePlugin] Started Device Monitor");
+
+          this.manager = new DeviceManager(registry);
+          this.app.registerService("deviceManager", this.manager);
+          console.log("[DevicePlugin] Started Device Manager");
 
       } catch (e) {
           console.error("[DevicePlugin] Failed to start:", e);
