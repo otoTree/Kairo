@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="kairo_display_v1">
+  <copyright>
+    Copyright © 2025 Kairo Project
+    SPDX-License-Identifier: MIT
+  </copyright>
+
+  <interface name="kairo_display_v1" version="1">
+    <description summary="Kairo Display Protocol Manager">
+      The global manager for Kairo Display Protocol.
+      It allows clients (Kernel) to create surfaces for rendering UI trees.
+    </description>
+
+    <request name="get_kairo_surface">
+      <description summary="create a kairo surface">
+        Create a kairo_surface for a given wl_surface.
+        The wl_surface will be used as the canvas for the UI tree.
+      </description>
+      <arg name="id" type="new_id" interface="kairo_surface_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="kairo_surface_v1" version="1">
+    <description summary="Kairo Surface">
+      A surface that renders a JSON-based UI tree.
+      The client sends the UI tree as a string, and the compositor renders it.
+    </description>
+
+    <request name="commit_ui_tree">
+      <description summary="update the UI tree">
+        Send a new UI tree to be rendered on this surface.
+        The tree is a JSON string.
+      </description>
+      <arg name="json_payload" type="string" summary="Serialized UI Tree JSON"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the kairo surface">
+        Destroy the kairo_surface object. The underlying wl_surface is not destroyed.
+      </description>
+    </request>
+
+    <event name="user_action">
+      <description summary="user interaction event">
+        Emitted when the user interacts with the UI (e.g. click, input).
+      </description>
+      <arg name="element_id" type="string"/>
+      <arg name="action_type" type="string" summary="click, submit, hover"/>
+      <arg name="payload" type="string" summary="JSON data (e.g. input value)"/>
+    </event>
+  </interface>
+</protocol>

@@ -1,0 +1,23 @@
+.{
+    .name = .tinywl,
+    .version = "0.0.0",
+    .paths = .{""},
+    .dependencies = .{
+        .pixman = .{
+            .url = "https://codeberg.org/ifreund/zig-pixman/archive/v0.3.0.tar.gz",
+            .hash = "pixman-0.3.0-LClMnz2VAAAs7QSCGwLimV5VUYx0JFnX5xWU6HwtMuDX",
+        },
+        .wayland = .{
+            .url = "https://codeberg.org/ifreund/zig-wayland/archive/v0.4.0.tar.gz",
+            .hash = "wayland-0.4.0-lQa1khbMAQAsLS2eBR7M5lofyEGPIbu2iFDmoz8lPC27",
+        },
+        .wlroots = .{
+            .path = "..",
+        },
+        .xkbcommon = .{
+            .url = "https://codeberg.org/ifreund/zig-xkbcommon/archive/v0.3.0.tar.gz",
+            .hash = "xkbcommon-0.3.0-VDqIe3K9AQB2fG5ZeRcMC9i7kfrp5m2rWgLrmdNn9azr",
+        },
+    },
+    .fingerprint = 0x11f0eae53700be85,
+}

@@ -9,18 +9,18 @@
 ### 1.1 开发环境搭建
 *   **必读文档**: [开发环境搭建指南](./dev_setup.md) (`dev_setup.md`)
 *   **任务**:
-    *   [ ] 安装 Zig 0.13+ (或 River 要求版本)。
-    *   [ ] 安装 Wayland 协议开发包 (`wayland-protocols`, `wayland-scanner`).
-    *   [ ] 安装 `wlroots` 依赖 (或确认 Zig 构建脚本能自动拉取)。
-    *   [ ] (macOS 用户) 配置 Lima/QEMU Linux 虚拟机，因为 macOS 不支持 DRM/KMS。
+    *   [x] 安装 Zig 0.13+ (或 River 要求版本)。
+    *   [x] 安装 Wayland 协议开发包 (`wayland-protocols`, `wayland-scanner` - 已通过 vendor 本地化解决)。
+    *   [x] 安装 `wlroots` 依赖 (已通过 vendor 本地化解决)。
+    *   [x] (macOS 用户) 配置 Lima/QEMU Linux 虚拟机，因为 macOS 不支持 DRM/KMS。
 
-### 1.2 River 源码集成
+### 1.2 River 源码集成 (已本地化)
 *   **必读文档**: [Kairo Shell 规范](./kairo_shell_spec.md) (`kairo_shell_spec.md`)
 *   **任务**:
-    *   [ ] 在 `os/` 目录下初始化 Zig 项目结构。
-    *   [ ] 在 `os/build.zig` 中添加 `river` 作为依赖 (Fork 或 Upstream)。
-    *   [ ] 编译测试：运行 `zig build` 确保能生成 `river` 二进制文件。
-    *   [ ] 编写基础启动脚本 `init`，确保 River 启动后不报错退出。
+    *   [x] 在 `os/src/shell/river` 目录下集成 River 核心源码 (不再作为外部依赖)。
+    *   [x] 在 `os/build.zig` 中添加 `river` 本地构建逻辑。
+    *   [x] 编译测试：运行 `zig build` 确保能生成 `river` 二进制文件。
+    *   [x] 编写基础启动脚本 `init`，确保 River 启动后不报错退出。
 
 ---
 
@@ -31,15 +31,15 @@
 ### 2.1 WM 基础架构
 *   **必读文档**: [Kairo WM 规范](./kairo_wm_spec.md) (`kairo_wm_spec.md`)
 *   **任务**:
-    *   [ ] 创建 `os/src/wm/` 目录。
-    *   [ ] 实现 `river-window-management-v1` 协议的 Client 端连接。
-    *   [ ] 编写一个简单的 Zig 程序，连接到运行中的 River 并打印窗口事件。
+    *   [x] 创建 `os/src/wm/` 目录。
+    *   [x] 实现 `river-window-management-v1` 协议的 Client 端连接。
+    *   [x] 编写一个简单的 Zig 程序，连接到运行中的 River 并打印窗口事件。
 
 ### 2.2 布局算法实现
 *   **任务**:
-    *   [ ] 实现 `Master/Stack` 布局逻辑：第一个窗口占左半边，后续窗口平分右半边。
-    *   [ ] 替换 River 默认的 `rivertile`，使用 `kairo-wm` 作为布局管理器。
-    *   [ ] 验证：打开多个终端窗口，观察布局是否符合预期。
+    *   [x] Implement `Master/Stack` layout logic: first window takes left half, subsequent windows share right half.
+    *   [x] Replace River default `rivertile` with `kairo-wm` as layout manager.
+    *   [ ] Verify: Open multiple terminal windows and observe if the layout is as expected.
 
 ---
 
@@ -50,13 +50,13 @@
 ### 3.1 KCP 协议实现 (Control Channel)
 *   **必读文档**: [Shell & Kernel 交互规范](./shell_kernel_interaction_spec.md) (`shell_kernel_interaction_spec.md`)
 *   **任务**:
-    *   [ ] **Kernel 端**: 在 `src/domains/kernel` 中实现 KCP Server (Unix Socket /tmp/kairo-kernel.sock)。
-    *   [ ] **Shell 端**: 在 Zig 中实现 KCP Client，启动时尝试连接 Kernel。
-    *   [ ] **联调**: Shell 发送 `system.hello`，Kernel 收到并打印日志。
+    *   [x] **Kernel 端**: 在 `src/domains/kernel` 中实现 KCP Server (Unix Socket /tmp/kairo-kernel.sock)。
+    *   [x] **Shell 端**: 在 Zig 中实现 KCP Client，启动时尝试连接 Kernel。
+    *   [x] **联调**: Shell 发送 `system.hello` (or `system.get_metrics`)，Kernel 收到并打印日志。
 
 ### 3.2 混合合成原型 (Hybrid Composition)
 *   **任务**:
-    *   [ ] **Agent 占位**: 在 `kairo-wm` 中添加逻辑，当收到 Kernel 的 "Agent Active" 信号时，强制预留屏幕右侧 30% 空间。
+    *   [x] **Agent 占位**: 在 `kairo-wm` 中添加逻辑，当收到 Kernel 的 "Agent Active" 信号时，强制预留屏幕右侧 30% 空间。
     *   [ ] **测试**: 模拟发送信号，观察现有窗口是否自动挤压变形。
 
 ---
@@ -67,14 +67,14 @@
 
 ### 4.1 协议定义与注入
 *   **任务**:
-    *   [ ] 编写 `kairo-display-v1.xml` 协议定义文件。
-    *   [ ] 修改 River 源码，注册该协议扩展。
+    *   [x] 编写 `kairo-display-v1.xml` 协议定义文件。
+    *   [x] 修改 River 源码，注册该协议扩展。
 
 ### 4.2 渲染器实现
 *   **任务**:
-    *   [ ] 在 River 渲染循环 (render loop) 中注入 Overlay 绘制逻辑。
+    *   [ ] 在 River 渲染循环 (render loop) 中注入 Overlay 绘制逻辑 (目前仅打印日志)。
     *   [ ] 实现简单的矩形和文本绘制 (使用 Cairo 或 OpenGL)。
-    *   [ ] **Kernel 端**: 实现 KDP Client，发送一个 JSON UI 树。
+    *   [x] **Kernel 端**: 在 `kairo-wm` 中实现 KDP Client，发送一个 JSON UI 树。
     *   [ ] **联调**: Kernel 发送指令，屏幕上出现一个悬浮的“Hello Kairo” 文本框。
 
 ---

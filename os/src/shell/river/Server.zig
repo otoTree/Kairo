@@ -33,6 +33,8 @@ const XdgToplevel = @import("XdgToplevel.zig");
 const XwaylandOverrideRedirect = @import("XwaylandOverrideRedirect.zig");
 const XwaylandWindow = @import("XwaylandWindow.zig");
 
+const KairoDisplay = @import("KairoDisplay.zig");
+
 const log = std.log;
 
 wl_server: *wl.Server,
@@ -83,6 +85,7 @@ lock_manager: LockManager,
 wm: WindowManager,
 xkb_bindings: XkbBindings,
 layer_shell: LayerShell,
+kairo_display: KairoDisplay,
 
 xwayland: if (build_options.xwayland) ?*wlr.Xwayland else void = if (build_options.xwayland) null,
 new_xsurface: if (build_options.xwayland) wl.Listener(*wlr.XwaylandSurface) else void =
@@ -152,6 +155,7 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
         .wm = undefined,
         .xkb_bindings = undefined,
         .layer_shell = undefined,
+        .kairo_display = undefined,
     };
 
     if (renderer.getTextureFormats(@intFromEnum(wlr.BufferCap.dmabuf)) != null) {
@@ -172,6 +176,7 @@ pub fn init(server: *Server, runtime_xwayland: bool) !void {
     try server.wm.init();
     try server.xkb_bindings.init();
     try server.layer_shell.init();
+    try server.kairo_display.init();
     try server.scene.init();
     try server.om.init();
     try server.input_manager.init();

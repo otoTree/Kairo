@@ -1,0 +1,18 @@
+#!/bin/sh
+# Kairo River Init Script
+
+# Basic keybindings
+riverctl map normal Super Return spawn alacritty
+riverctl map normal Super Q close
+riverctl map normal Super E exit
+
+# Appearance
+riverctl background-color 0x002b36
+riverctl border-color-focused 0x93a1a1
+riverctl border-color-unfocused 0x586e75
+
+# Input
+riverctl set-repeat 50 300
+
+# Layout (Managed by Kairo WM)
+kairo-wm &

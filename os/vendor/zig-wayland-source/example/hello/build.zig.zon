@@ -1,0 +1,11 @@
+.{
+    .name = .hello_wayland,
+    .version = "0.0.0",
+    .paths = .{""},
+    .dependencies = .{
+        .wayland = .{
+            .path = "../..",
+        },
+    },
+    .fingerprint = 0xe25da197dad60a60,
+}

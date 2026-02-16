@@ -39,3 +39,14 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Ignored repositories
 /river/
+
+.zig-cache/
+zig-out/
+
+# Local VM and Data
+.lima/
+data/
+
+# OS Artifacts
+os/main
+*.tar.gz

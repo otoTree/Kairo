@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2024 The River Developers
+// SPDX-License-Identifier: GPL-3.0-only
+.{
+    .name = .river,
+    .version = "0.4.0-dev",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "protocol",
+        "LICENSE",
+        "README.md",
+    },
+    .dependencies = .{
+        .pixman = .{
+            .path = "../../../vendor/zig-pixman-source",
+        },
+        .wayland = .{
+            .path = "../../../vendor/zig-wayland-source",
+        },
+        .wlroots = .{
+            .path = "../../../vendor/zig-wlroots-source",
+        },
+        .xkbcommon = .{
+            .path = "../../../vendor/zig-xkbcommon-source",
+        },
+    },
+    .fingerprint = 0xf5e3672b8e8d6efc,
+}

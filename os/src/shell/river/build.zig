@@ -67,7 +67,12 @@ pub fn build(b: *Build) !void {
     options.addOption(bool, "xwayland", xwayland);
     options.addOption([]const u8, "version", full_version);
 
-    const scanner = Scanner.create(b, .{});
+    const wayland_dep = b.dependency("wayland", .{});
+    const scanner = Scanner.create(b, .{
+        .wayland_xml = b.path("../../../vendor/wayland-core/protocol/wayland.xml"),
+        .wayland_protocols = b.path("../../../vendor/wayland-protocols-core"),
+        .scanner_zig = wayland_dep.path("src/scanner.zig"),
+    });
 
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
     scanner.addSystemProtocol("stable/viewporter/viewporter.xml");
@@ -79,15 +84,16 @@ pub fn build(b: *Build) !void {
     scanner.addSystemProtocol("unstable/tablet/tablet-unstable-v2.xml");
     scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
 
-    scanner.addCustomProtocol(b.path("protocol/river-window-management-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/river-xkb-bindings-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/river-layer-shell-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/river-input-management-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/river-libinput-config-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/river-xkb-config-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-window-management-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-xkb-bindings-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-layer-shell-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-input-management-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-libinput-config-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/river-xkb-config-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/kairo-display-v1.xml"));
 
-    scanner.addCustomProtocol(b.path("protocol/upstream/wlr-layer-shell-unstable-v1.xml"));
-    scanner.addCustomProtocol(b.path("protocol/upstream/wlr-output-power-management-unstable-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/upstream/wlr-layer-shell-unstable-v1.xml"));
+    scanner.addCustomProtocol(b.path("../protocol/upstream/wlr-output-power-management-unstable-v1.xml"));
 
     // Some of these versions may be out of date with what wlroots implements.
     // This is not a problem in practice though as long as river successfully compiles.
@@ -117,6 +123,7 @@ pub fn build(b: *Build) !void {
     scanner.generate("river_input_manager_v1", 1);
     scanner.generate("river_libinput_config_v1", 1);
     scanner.generate("river_xkb_config_v1", 1);
+    scanner.generate("kairo_display_v1", 1);
 
     scanner.generate("zwlr_output_power_manager_v1", 1);
     scanner.generate("zwlr_layer_shell_v1", 4);
@@ -135,18 +142,19 @@ pub fn build(b: *Build) !void {
     // exposed to the wlroots module for @cImport() to work. This seems to be
     // the best way to do so with the current std.Build API.
     wlroots.resolved_target = target;
-    const wlroots_pkgconf = "wlroots-0.19";
-    wlroots.linkSystemLibrary(wlroots_pkgconf, .{});
+    // const wlroots_pkgconf = "wlroots-0.19";
+    // wlroots.linkSystemLibrary(wlroots_pkgconf, .{});
+    wlroots.linkSystemLibrary("wlroots-0.19", .{});
 
-    const flags = b.createModule(.{ .root_source_file = b.path("common/flags.zig") });
-    const slotmap = b.createModule(.{ .root_source_file = b.path("common/slotmap.zig") });
-    const deque = b.createModule(.{ .root_source_file = b.path("common/deque.zig") });
+    const flags = b.createModule(.{ .root_source_file = b.path("../common/flags.zig") });
+    const slotmap = b.createModule(.{ .root_source_file = b.path("../common/slotmap.zig") });
+    const deque = b.createModule(.{ .root_source_file = b.path("../common/deque.zig") });
 
     {
         const river = b.addExecutable(.{
             .name = "river",
             .root_module = b.createModule(.{
-                .root_source_file = b.path("river/main.zig"),
+                .root_source_file = b.path("main.zig"),
                 .target = target,
                 .optimize = optimize,
                 .strip = strip,
@@ -155,10 +163,14 @@ pub fn build(b: *Build) !void {
         river.root_module.addOptions("build_options", options);
 
         river.linkLibC();
+        river.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+        river.addLibraryPath(.{ .cwd_relative = "/lib" });
+        river.addIncludePath(.{ .cwd_relative = "/usr/include" });
         river.linkSystemLibrary("libevdev");
         river.linkSystemLibrary("libinput");
         river.linkSystemLibrary("wayland-server");
-        river.linkSystemLibrary(wlroots_pkgconf);
+        // river.linkSystemLibrary(wlroots_pkgconf);
+        river.linkSystemLibrary("wlroots-0.19");
         river.linkSystemLibrary("xkbcommon");
         river.linkSystemLibrary("pixman-1");
 
@@ -171,7 +183,7 @@ pub fn build(b: *Build) !void {
         river.root_module.addImport("deque", deque);
 
         river.addCSourceFile(.{
-            .file = b.path("river/wlroots_log_wrapper.c"),
+            .file = b.path("wlroots_log_wrapper.c"),
             .flags = &.{ "-std=c99", "-O2" },
         });
 
@@ -202,7 +214,7 @@ pub fn build(b: *Build) !void {
             "river-libinput-config-v1.xml",
             "river-xkb-config-v1.xml",
         }) |protocol| {
-            b.installFile("protocol/" ++ protocol, "share/river-protocols/stable/" ++ protocol);
+            b.installFile("../protocol/" ++ protocol, "share/river-protocols/stable/" ++ protocol);
         }
     }
 
@@ -253,20 +265,16 @@ const manifest: struct {
     paths: []const []const u8,
     dependencies: struct {
         pixman: struct {
-            url: []const u8,
-            hash: []const u8,
+            path: []const u8,
         },
         wayland: struct {
-            url: []const u8,
-            hash: []const u8,
+            path: []const u8,
         },
         wlroots: struct {
-            url: []const u8,
-            hash: []const u8,
+            path: []const u8,
         },
         xkbcommon: struct {
-            url: []const u8,
-            hash: []const u8,
+            path: []const u8,
         },
     },
     fingerprint: u64,
