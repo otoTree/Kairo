@@ -50,3 +50,5 @@ data/
 # OS Artifacts
 os/main
 *.tar.gz
+
+.vscode/

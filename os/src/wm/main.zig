@@ -65,6 +65,7 @@ fn outputListener(output: *river.OutputV1, event: river.OutputV1.Event, ctx: *Ou
 }
 
 fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ctx: *Context) void {
+    std.debug.print("WM: event received: {}\n", .{@intFromEnum(event)});
     switch (event) {
         .window => |ev| {
             const win = ctx.allocator.create(Window) catch return;
@@ -74,9 +75,7 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
             };
             ev.id.setListener(*Window, windowListener, win);
             ctx.windows.append(ctx.allocator, win) catch return;
-
-            // Initial mapping
-            ev.id.show();
+            std.debug.print("WM: new window (total: {})\n", .{ctx.windows.items.len});
         },
         .output => |ev| {
             const out = ctx.allocator.create(Output) catch return;
@@ -87,30 +86,34 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
             };
             ev.id.setListener(*Output, outputListener, out);
             ctx.outputs.append(ctx.allocator, out) catch return;
+            std.debug.print("WM: new output\n", .{});
+        },
+        .manage_start => {
+            // Manage sequence: propose dimensions for all windows
+            proposeDimensions(ctx);
+            wm.manageFinish();
         },
         .render_start => {
-            applyLayout(ctx);
+            // Render sequence: set positions for all window nodes
+            positionWindows(ctx);
             wm.renderFinish();
         },
         else => {},
     }
 }
 
-fn applyLayout(ctx: *Context) void {
+/// Manage sequence: propose dimensions for all windows
+fn proposeDimensions(ctx: *Context) void {
     if (ctx.outputs.items.len == 0) return;
-    const output = ctx.outputs.items[0]; // Assume single output for now
+    const output = ctx.outputs.items[0];
 
     const width = output.width;
     const height = output.height;
 
-    // Filter out closed windows (naive check if we tracked closed state)
-    // For this prototype, we assume all in list are valid.
-
     const window_count = ctx.windows.items.len;
     if (window_count == 0) return;
 
-    // Padding
-    const pad = 10;
+    const pad: i32 = 10;
 
     var available_width = width;
     if (ctx.agent_active) {
@@ -121,27 +124,59 @@ fn applyLayout(ctx: *Context) void {
     const effective_height = height - (2 * pad);
 
     if (window_count == 1) {
-        const win = ctx.windows.items[0];
-        win.river_window.proposeDimensions(effective_width, effective_height);
-        if (win.node) |n| n.setPosition(pad, pad);
+        ctx.windows.items[0].river_window.proposeDimensions(effective_width, effective_height);
     } else {
-        // Master/Stack
-        const master_width = @divFloor(effective_width, 2) - (pad / 2);
+        const master_width = @divFloor(effective_width, 2) - @divFloor(pad, 2);
         const stack_width = effective_width - master_width - pad;
-        const stack_height = @divFloor(effective_height, @as(i32, @intCast(window_count - 1))) - pad;
+        const stack_count: i32 = @intCast(window_count - 1);
+        const stack_height = @divFloor(effective_height, stack_count) - pad;
 
-        // Master (Left)
-        const master = ctx.windows.items[0];
-        master.river_window.proposeDimensions(master_width, effective_height);
-        if (master.node) |n| n.setPosition(pad, pad);
+        ctx.windows.items[0].river_window.proposeDimensions(master_width, effective_height);
 
-        // Stack (Right)
+        for (ctx.windows.items[1..]) |win| {
+            win.river_window.proposeDimensions(stack_width, stack_height);
+        }
+    }
+
+    std.debug.print("WM: proposed dimensions for {} windows\n", .{window_count});
+}
+
+/// Render sequence: set positions for all window nodes
+fn positionWindows(ctx: *Context) void {
+    if (ctx.outputs.items.len == 0) return;
+    const output = ctx.outputs.items[0];
+
+    const width = output.width;
+
+    const window_count = ctx.windows.items.len;
+    if (window_count == 0) return;
+
+    const pad: i32 = 10;
+
+    var available_width = width;
+    if (ctx.agent_active) {
+        available_width = @divFloor(width * 70, 100);
+    }
+
+    const effective_width = available_width - (2 * pad);
+    const effective_height = output.height - (2 * pad);
+
+    if (window_count == 1) {
+        if (ctx.windows.items[0].node) |n| n.setPosition(pad, pad);
+    } else {
+        const master_width = @divFloor(effective_width, 2) - @divFloor(pad, 2);
+        const stack_count: i32 = @intCast(window_count - 1);
+        const stack_height = @divFloor(effective_height, stack_count) - pad;
+
+        if (ctx.windows.items[0].node) |n| n.setPosition(pad, pad);
+
         for (ctx.windows.items[1..], 0..) |win, i| {
             const y_offset = pad + @as(i32, @intCast(i)) * (stack_height + pad);
-            win.river_window.proposeDimensions(stack_width, stack_height);
             if (win.node) |n| n.setPosition(pad + master_width + pad, y_offset);
         }
     }
+
+    std.debug.print("WM: positioned {} windows\n", .{window_count});
 }
 
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, ctx: *Context) void {
@@ -223,6 +258,13 @@ pub fn main() !void {
         return;
     }
 
+    // Second roundtrip: after binding WM global, server sends initial state
+    std.debug.print("Doing second roundtrip for WM events...\n", .{});
+    if (display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
+    // Flush immediately - River has a 3s timeout for manage_finish
+    if (display.flush() != .SUCCESS) return error.RoundtripFailed;
+    std.debug.print("After second roundtrip: windows={}, outputs={}\n", .{ ctx.windows.items.len, ctx.outputs.items.len });
+
     // Phase 4: Test KDP
     if (ctx.kairo_display != null and ctx.compositor_global != null) {
         if (ctx.compositor_global.?.createSurface()) |surface| {
@@ -286,7 +328,8 @@ pub fn main() !void {
                         if (ipc.Client.isAgentActiveEvent(packet)) |active| {
                             std.debug.print("Agent Active State Changed: {}\n", .{active});
                             ctx.agent_active = active;
-                            applyLayout(&ctx);
+                            // Request a new manage sequence to re-layout
+                            if (ctx.wm_global) |wm| wm.manageDirty();
                         }
                     } else {
                         // EOF

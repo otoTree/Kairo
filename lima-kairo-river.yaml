@@ -1,0 +1,91 @@
+# Kairo River - Alpine Lima VM
+# 与 Docker 构建环境 (alpine:edge) 匹配，直接运行 musl 二进制
+#
+# 使用:
+#   limactl create --name kairo-river lima-kairo-river.yaml
+#   limactl start kairo-river
+#   limactl shell kairo-river
+#   # 然后执行 deploy-vm.sh 和 start-river.sh
+
+minimumLimaVersion: 2.0.0
+
+vmType: "qemu"
+video:
+  display: "vnc"
+
+cpus: 4
+memory: "4GiB"
+disk: "20GiB"
+
+images:
+- location: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/nocloud_alpine-3.23.2-aarch64-uefi-cloudinit-r0.qcow2"
+  arch: "aarch64"
+- location: "https://dl-cdn.alpinelinux.org/alpine/v3.23/releases/cloud/nocloud_alpine-3.23.2-x86_64-uefi-cloudinit-r0.qcow2"
+  arch: "x86_64"
+
+provision:
+- mode: system
+  script: |
+    #!/bin/sh
+    set -eux
+
+    # 启用 edge 仓库 (wlroots 等包在 edge/community)
+    cat > /etc/apk/repositories << 'EOF'
+    https://dl-cdn.alpinelinux.org/alpine/edge/main
+    https://dl-cdn.alpinelinux.org/alpine/edge/community
+    https://dl-cdn.alpinelinux.org/alpine/edge/testing
+    EOF
+
+    apk update
+    apk upgrade --available
+
+    # Wayland + wlroots 运行时依赖 (与 Dockerfile 最终阶段一致)
+    apk add --no-cache \
+      wayland \
+      wlroots \
+      libinput \
+      libevdev \
+      libxkbcommon \
+      pixman \
+      mesa-dri-gallium \
+      eudev \
+      seatd \
+      xwayland
+
+    # 终端模拟器
+    apk add --no-cache foot
+
+    # 基础工具
+    apk add --no-cache bash shadow sudo
+
+    # 启用 seatd
+    rc-update add seatd default
+    rc-service seatd start || true
+
+    # 将默认用户加入 seat/video/input 组
+    for g in seat video input; do
+      addgroup "{{.User}}" "$g" 2>/dev/null || true
+    done
+
+    # 配置 TTY 自动登录
+    sed -i 's|^tty1::.*|tty1::respawn:/sbin/agetty --autologin {{.User}} --noclear tty1 linux|' /etc/inittab 2>/dev/null || true
+
+probes:
+- description: "seatd running"
+  script: |
+    #!/bin/sh
+    rc-service seatd status 2>/dev/null && exit 0
+    exit 1
+  hint: "seatd 未启动，检查 /var/log/messages"
+
+message: |
+  Kairo River VM 已就绪!
+
+  VNC: 查看 ~/.lima/kairo-river/vncdisplay
+  部署: limactl shell kairo-river -- ~/Desktop/Kairo/scripts/deploy-vm.sh
+  启动: limactl shell kairo-river -- ~/Desktop/Kairo/scripts/start-river.sh
+
+mountTypesUnsupported: [9p]
+mounts:
+- location: "~"
+  writable: true
