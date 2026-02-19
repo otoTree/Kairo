@@ -90,6 +90,52 @@ pub const Client = struct {
         };
     }
 
+    /// 检查 EVENT 帧是否包含指定 topic
+    pub fn isEventWithTopic(packet: Packet, topic: []const u8) bool {
+        if (packet.type != .EVENT) return false;
+        return std.mem.indexOf(u8, packet.payload, topic) != null;
+    }
+
+    /// 检查 STREAM_CHUNK 帧是否属于指定订阅
+    pub fn isStreamChunkFor(packet: Packet, subscription_id: []const u8) bool {
+        if (packet.type != .STREAM_CHUNK) return false;
+        return std.mem.indexOf(u8, packet.payload, subscription_id) != null;
+    }
+
+    /// 从 STREAM_CHUNK 帧中提取数据段
+    /// 返回 payload 中 "data" 字段之后的原始字节（简化解析）
+    pub fn extractStreamData(packet: Packet) ?[]const u8 {
+        if (packet.type != .STREAM_CHUNK) return null;
+        // 查找 "data" 标记后的 bin 格式数据
+        const marker = "data";
+        const idx = std.mem.indexOf(u8, packet.payload, marker);
+        if (idx) |i| {
+            const start = i + marker.len;
+            if (start >= packet.payload.len) return null;
+            // MsgPack bin8: 0xC4 + len(1) + data
+            // MsgPack bin16: 0xC5 + len(2) + data
+            // MsgPack bin32: 0xC6 + len(4) + data
+            const tag_pos = start;
+            if (tag_pos >= packet.payload.len) return null;
+            const tag = packet.payload[tag_pos];
+            if (tag == 0xC4 and tag_pos + 2 < packet.payload.len) {
+                const data_len = packet.payload[tag_pos + 1];
+                const data_start = tag_pos + 2;
+                if (data_start + data_len <= packet.payload.len) {
+                    return packet.payload[data_start .. data_start + data_len];
+                }
+            }
+            if (tag == 0xC5 and tag_pos + 3 < packet.payload.len) {
+                const data_len = std.mem.readInt(u16, packet.payload[tag_pos + 1 .. tag_pos + 3][0..2], .big);
+                const data_start = tag_pos + 3;
+                if (data_start + data_len <= packet.payload.len) {
+                    return packet.payload[data_start .. data_start + data_len];
+                }
+            }
+        }
+        return null;
+    }
+
     pub fn isAgentActiveEvent(packet: Packet) ?bool {
         if (packet.type != .EVENT) return null;
 

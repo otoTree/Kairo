@@ -53,3 +53,13 @@ export interface EventStore {
   append(event: KairoEvent): Promise<void>;
   query(filter: EventFilter): Promise<KairoEvent[]>;
 }
+
+/**
+ * 取消事件：用于中断正在执行的事件链
+ */
+export interface CancelEventData {
+  targetCorrelationId: string;
+  reason?: string;
+}
+
+export type CancelEvent = KairoEvent<CancelEventData>;

@@ -88,13 +88,18 @@ export class KernelPlugin implements Plugin {
         this.deviceRegistry,
         this.systemMonitor
       );
-  
+
       this.bridge.start();
+
+      // 注入 EventBus 到 IPC Server，启用 topic 订阅桥接
+      this.ipcServer.setEventBus(agentPlugin.globalBus);
+
       rootLogger.info("[Kernel] Started Event Bridge");
 
       // Register System Tools
       this.registerTerminalTools(agentPlugin);
       this.registerStateTools(agentPlugin);
+      this.registerProcessIOTools(agentPlugin);
 
     } catch (e) {
       rootLogger.warn("[Kernel] AgentPlugin not found. Event Bridge & Tools disabled.");
@@ -180,7 +185,7 @@ export class KernelPlugin implements Plugin {
       const id = await this.stateManager.saveCheckpoint();
       return { content: `Checkpoint saved: ${id}` };
     });
-    
+
     agent.registerSystemTool({
       name: "kairo_state_restore",
       description: "Restore system state from checkpoint.",
@@ -193,5 +198,60 @@ export class KernelPlugin implements Plugin {
       await this.stateManager.restoreCheckpoint(params.id);
       return { content: `Checkpoint restored: ${params.id}. Please restart Kernel.` };
     });
+  }
+
+  /**
+   * 注册 Process IO 系统工具，让 Agent 能与子进程全双工通信
+   */
+  private registerProcessIOTools(agent: AgentPlugin) {
+    // kairo_process_write — 向子进程 stdin 写入数据
+    agent.registerSystemTool({
+      name: "kairo_process_write",
+      description: "Write data to a child process stdin.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          processId: { type: "string", description: "Process ID" },
+          data: { type: "string", description: "Data to write to stdin" },
+        },
+        required: ["processId", "data"]
+      }
+    }, async (args) => {
+      this.processManager.writeToStdin(args.processId, args.data);
+      return { status: "written", processId: args.processId };
+    });
+
+    // kairo_process_status — 查询进程状态
+    agent.registerSystemTool({
+      name: "kairo_process_status",
+      description: "Query the status of a child process.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          processId: { type: "string", description: "Process ID" },
+        },
+        required: ["processId"]
+      }
+    }, async (args) => {
+      return this.processManager.getStatus(args.processId);
+    });
+
+    // kairo_process_wait — 等待进程退出
+    agent.registerSystemTool({
+      name: "kairo_process_wait",
+      description: "Wait for a child process to exit. Returns exit code.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          processId: { type: "string", description: "Process ID" },
+        },
+        required: ["processId"]
+      }
+    }, async (args) => {
+      const exitCode = await this.processManager.wait(args.processId);
+      return { exitCode, processId: args.processId };
+    });
+
+    rootLogger.info("[Kernel] Registered Process IO Tools");
   }
 }

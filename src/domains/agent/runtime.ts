@@ -3,7 +3,7 @@ import type { MCPPlugin } from "../mcp/mcp.plugin";
 import type { Observation } from "./observation-bus"; // Still need type for memory compat
 import type { AgentMemory } from "./memory";
 import type { SharedMemory } from "./shared-memory";
-import type { EventBus, KairoEvent } from "../events";
+import type { EventBus, KairoEvent, CancelEventData } from "../events";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { rootLogger } from "../observability/logger";
 import type { Logger } from "../observability/types";
@@ -70,7 +70,9 @@ export class AgentRuntime {
   
   // Track pending actions for result correlation
   private pendingActions: Set<string> = new Set();
-  
+  // actionEventId → correlationId 映射，用于取消语义
+  private pendingCorrelations = new Map<string, string>();
+
   // Internal event buffer to replace legacy adapter
   private eventBuffer: KairoEvent[] = [];
 
@@ -145,6 +147,9 @@ export class AgentRuntime {
     // Subscribe to system events
     unsubs.push(this.bus.subscribe("kairo.system.>", this.handleEvent.bind(this)));
 
+    // 订阅取消事件
+    unsubs.push(this.bus.subscribe("kairo.cancel", this.handleCancel.bind(this)));
+
     this.unsubscribe = () => {
       unsubs.forEach(u => u());
     };
@@ -176,6 +181,7 @@ export class AgentRuntime {
         }
         // It is for us, consume it and remove from pending
         this.pendingActions.delete(event.causationId);
+        this.pendingCorrelations.delete(event.causationId);
     }
 
     // Filter user messages if targeted
@@ -192,6 +198,35 @@ export class AgentRuntime {
       this.eventBuffer = this.eventBuffer.slice(-AgentRuntime.MAX_EVENT_BUFFER);
     }
     this.onObservation();
+  }
+
+  /**
+   * 处理取消事件：终止匹配 correlationId 的待处理动作
+   */
+  private handleCancel(event: KairoEvent) {
+    if (!this.running) return;
+    const data = event.data as CancelEventData;
+    if (!data?.targetCorrelationId) return;
+
+    // 查找匹配的 pendingAction
+    for (const [actionId, corrId] of this.pendingCorrelations) {
+      if (corrId === data.targetCorrelationId) {
+        this.pendingActions.delete(actionId);
+        this.pendingCorrelations.delete(actionId);
+
+        this.log(`取消动作 ${actionId}，原因: ${data.reason || '用户取消'}`);
+
+        // 发布取消完成事件
+        this.publish({
+          type: "kairo.intent.cancelled",
+          source: "agent:" + this.id,
+          data: { actionId, reason: data.reason },
+          correlationId: data.targetCorrelationId,
+          causationId: event.id,
+        });
+        break;
+      }
+    }
   }
 
   private onObservation() {
@@ -423,10 +458,17 @@ export class AgentRuntime {
               });
               
               this.pendingActions.add(actionEventId);
+              // 记录 actionId → correlationId 映射，用于取消语义
+              if (correlationId) {
+                this.pendingCorrelations.set(actionEventId, correlationId);
+              }
               // 限制 pendingActions 大小，清理最早的条目
               if (this.pendingActions.size > AgentRuntime.MAX_PENDING_ACTIONS) {
                 const oldest = this.pendingActions.values().next().value;
-                if (oldest) this.pendingActions.delete(oldest);
+                if (oldest) {
+                  this.pendingActions.delete(oldest);
+                  this.pendingCorrelations.delete(oldest);
+                }
               }
 
               try {

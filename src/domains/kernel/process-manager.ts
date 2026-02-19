@@ -30,6 +30,10 @@ export interface ProcessState {
 export class ProcessManager extends EventEmitter {
   private processes = new Map<string, Subprocess>();
   private pidMap = new Map<string, number>();
+  // 进程所有权追踪：processId → creatorId
+  private creatorMap = new Map<string, string>();
+  // 已退出进程的退出码缓存
+  private exitCodes = new Map<string, number>();
 
   constructor(private stateRepo?: StateRepository) {
     super();
@@ -61,7 +65,7 @@ export class ProcessManager extends EventEmitter {
     }
   }
 
-  async spawn(id: string, command: string[], options: ProcessOptions = {}): Promise<void> {
+  async spawn(id: string, command: string[], options: ProcessOptions = {}, creatorId?: string): Promise<void> {
     let finalCommand = command;
     let shellMode = false;
 
@@ -92,6 +96,9 @@ export class ProcessManager extends EventEmitter {
 
     this.processes.set(id, proc);
     this.pidMap.set(id, proc.pid);
+    if (creatorId) {
+      this.creatorMap.set(id, creatorId);
+    }
     
     console.log(`[ProcessManager] Spawned process ${id} (PID: ${proc.pid})`);
 
@@ -134,6 +141,7 @@ export class ProcessManager extends EventEmitter {
         }
 
         this.emit('exit', { id, code });
+        this.exitCodes.set(id, code);
         this.cleanup(id);
     });
   }
@@ -215,5 +223,30 @@ export class ProcessManager extends EventEmitter {
 
   getProcess(id: string): Subprocess | undefined {
     return this.processes.get(id);
+  }
+
+  /**
+   * 查询进程状态
+   */
+  getStatus(id: string): { state: 'running' | 'exited' | 'unknown'; exitCode?: number; pid?: number } {
+    const proc = this.processes.get(id);
+    if (proc) {
+      return { state: 'running', pid: this.pidMap.get(id) };
+    }
+    const exitCode = this.exitCodes.get(id);
+    if (exitCode !== undefined) {
+      return { state: 'exited', exitCode };
+    }
+    return { state: 'unknown' };
+  }
+
+  /**
+   * 检查进程是否由指定身份创建
+   * 如果进程没有记录创建者，则允许访问（向后兼容）
+   */
+  isOwnedBy(processId: string, creatorId: string): boolean {
+    const owner = this.creatorMap.get(processId);
+    if (!owner) return true; // 无所有者记录，允许访问
+    return owner === creatorId;
   }
 }

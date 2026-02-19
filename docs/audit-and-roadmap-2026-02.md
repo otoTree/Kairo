@@ -5,125 +5,95 @@
 
 ---
 
-## 一、安全缺陷（P0 — 必须立即修复）
+## 一、安全缺陷（P0 — ✅ 已全部修复）
 
-### 1.1 硬编码默认密钥
+### 1.1 ~~硬编码默认密钥~~ ✅ 已修复
 
 **位置**：`src/index.ts:111`
 
-```typescript
-process.env.KAIRO_TOKEN || "kairo_default_secret"
-```
+**修复**：启动时检测未设置 `KAIRO_TOKEN` 则拒绝启动，或自动生成随机密钥。
 
-**风险**：生产环境未设置环境变量时，系统使用可预测的默认密钥，攻击者可直接伪造身份。
-
-**修复方案**：启动时检测未设置 `KAIRO_TOKEN` 则拒绝启动，或自动生成随机密钥并写入安全存储。
-
-### 1.2 命令注入
+### 1.2 ~~命令注入~~ ✅ 已修复
 
 **位置**：`src/domains/skills/skills.plugin.ts:260`
 
-```typescript
-const cmd = `python3 "${scriptPath}" ${args.args.map(a => `"${a}"`).join(" ")}`;
-```
+**修复**：使用 `Bun.spawn` 数组参数形式，避免 shell 解释。
 
-**风险**：`args` 中包含 `"$(malicious)"` 或 `"; rm -rf /"` 等 payload 时可逃逸引号。
-
-**修复方案**：使用 `Bun.spawn` 数组参数形式，避免 shell 解释。
-
-### 1.3 seccomp 过滤器漏洞
+### 1.3 ~~seccomp 过滤器漏洞~~ ✅ 已修复
 
 **位置**：`src/domains/sandbox/vendor/seccomp-src/seccomp-unix-block.c:12`
 
-代码注释已承认：`socketcall()` 系统调用未被阻止。在 32 位兼容模式下，进程可通过 `socketcall()` 绕过网络隔离。
+**修复**：添加 `socketcall` 到 seccomp 黑名单，补充 32 位 x86 架构支持。
 
-**修复方案**：添加 `socketcall` 到 seccomp 黑名单，同时补充 32 位 x86 架构支持。
+### 1.4 ~~MCP SDK 高危漏洞~~ ✅ 已修复
 
-### 1.4 MCP SDK 高危漏洞
+**位置**：`package.json`
 
-**位置**：`package.json` — `@modelcontextprotocol/sdk@1.25.3`
+**修复**：已升级 `@modelcontextprotocol/sdk` 到 ≥1.26.0。
 
-存在跨客户端数据泄露漏洞（GHSA-345p-7cg4-v4c7），影响版本 1.10.0–1.25.3。
-
-**修复方案**：升级到 ≥1.26.0。
-
-### 1.5 CORS 完全开放
+### 1.5 ~~CORS 完全开放~~ ✅ 已修复
 
 **位置**：`src/domains/server/server.plugin.ts:29`
 
-```typescript
-origin: '*'
-```
+**修复**：限制为已知前端域名，从环境变量读取白名单。
 
-**修复方案**：限制为已知前端域名，或从环境变量读取白名单。
-
-### 1.6 路径遍历保护不足
+### 1.6 ~~路径遍历保护不足~~ ✅ 已修复
 
 **位置**：`src/domains/skills/skills.plugin.ts:247`
 
-仅使用 `startsWith` 检查路径前缀，未调用 `path.resolve` 规范化，`../` 可绕过。
-
-**修复方案**：`path.resolve(scriptPath).startsWith(path.resolve(skill.path))`。
+**修复**：使用 `path.resolve(scriptPath).startsWith(path.resolve(skill.path))` 规范化路径。
 
 ---
 
-## 二、核心缺陷（P1 — 影响系统稳定性）
+## 二、核心缺陷（P1 — ✅ 已全部修复）
 
-### 2.1 Zig Init 进程为空壳
+### 2.1 ~~Zig Init 进程为空壳~~ ✅ 已修复
 
 **位置**：`os/src/main.zig:3-6`
 
-当前 PID 1 仅打印一行日志后退出，缺少：
-- SIGCHLD 信号处理（僵尸进程回收）
-- SIGTERM/SIGINT 优雅关机
-- 服务启动编排
-- 进程监控与自动重启
+**修复**：已添加 SIGCHLD 信号处理、SIGTERM/SIGINT 优雅关机、服务启动编排、进程监控与自动重启。
 
-### 2.2 Zig WM 内存泄漏
+### 2.2 ~~Zig WM 内存泄漏~~ ✅ 已修复
 
 **位置**：`os/src/wm/main.zig:71-88`
 
-`Window` / `Output` 分配成功但 `ArrayList.append` 失败时，已分配对象未释放。需添加 `errdefer ctx.allocator.destroy(win)`。
+**修复**：添加 `errdefer ctx.allocator.destroy(win)` 等错误路径资源释放。
 
-### 2.3 空 catch 块吞没错误
+### 2.3 ~~空 catch 块吞没错误~~ ✅ 已修复
 
 **位置**：
 - `src/domains/skills/skills.plugin.ts:34,251,303`
 - `src/domains/sandbox/sandbox-manager.ts:540,576`
 - `src/domains/kernel/system-info.ts:51-66`
 
-错误被完全忽略，导致故障不可见、不可调试。
+**修复**：所有空 catch 块已添加错误日志记录。
 
-### 2.4 Agent Runtime 竞态条件
+### 2.4 ~~Agent Runtime 竞态条件~~ ✅ 已修复
 
 **位置**：`src/domains/agent/runtime.ts:191-234`
 
-`isTicking` 布尔标志在异步 `processTick()` 中不足以防止并发。多个事件可能同时触发 tick，导致状态不一致。
+**修复**：使用 Promise 锁 / AsyncMutex 替代 `isTicking` 布尔标志。
 
-**修复方案**：使用 Promise 锁或 AsyncMutex。
-
-### 2.5 MemCube 并发 ID 冲突
+### 2.5 ~~MemCube 并发 ID 冲突~~ ✅ 已修复
 
 **位置**：`src/domains/memory/memcube.ts:100-165`
 
-`add()` 并发调用时 `currentIntId` 自增可能冲突，多条记忆获得相同 ID。
+**修复**：使用原子操作或在事务内分配 ID。
 
-**修复方案**：使用原子操作或在事务内分配 ID。
-
-### 2.6 JSON.parse 缺少错误处理
+### 2.6 ~~JSON.parse 缺少错误处理~~ ✅ 已修复
 
 **位置**：
 - `src/domains/server/server.plugin.ts:78`（WebSocket 消息）
 - `src/domains/device/registry.ts:68`（配置文件）
 - `src/domains/database/repositories/checkpoint-repository.ts:29,43`
 
-畸形 JSON 将导致未捕获异常，可能崩溃整个进程。
+**修复**：所有 `JSON.parse` 调用已添加 try-catch 错误处理。
 
-### 2.7 KDP 缺少输入验证
+### 2.7 ~~KDP 缺少输入验证~~ ✅ 已修复
 
 **位置**：`os/src/shell/river/KairoDisplay.zig:107-109`
 
-JSON payload 无大小限制、无深度限制。恶意客户端可发送巨大 payload 触发 OOM。
+**修复**：添加 JSON payload 大小限制和深度限制。
 
 ---
 
@@ -298,27 +268,27 @@ JSON payload 无大小限制、无深度限制。恶意客户端可发送巨大 
 ## 六、优先级总览
 
 ```
-P0 安全修复（立即）
-├── 移除硬编码密钥
-├── 修复命令注入
-├── 修复 seccomp 漏洞
-├── 升级 MCP SDK
-├── 收紧 CORS
-└── 修复路径遍历
+P0 安全修复 ✅ 已全部修复
+├── ✅ 移除硬编码密钥
+├── ✅ 修复命令注入
+├── ✅ 修复 seccomp 漏洞
+├── ✅ 升级 MCP SDK
+├── ✅ 收紧 CORS
+└── ✅ 修复路径遍历
 
-P1 核心缺陷（1-2 周）
-├── 实现 Init 进程
-├── 修复 Zig 内存泄漏
-├── 消除空 catch 块
-├── 修复竞态条件
-├── 添加 JSON.parse 错误处理
-└── KDP 输入验证
+P1 核心缺陷 ✅ 已全部修复
+├── ✅ 实现 Init 进程
+├── ✅ 修复 Zig 内存泄漏
+├── ✅ 消除空 catch 块
+├── ✅ 修复竞态条件
+├── ✅ 添加 JSON.parse 错误处理
+└── ✅ KDP 输入验证
 
-阶段一：MVP v0.1 补齐（核心原语）
-├── Process IO 全双工
-├── IPC 服务端推送
-├── 事件序列语义贯通
-└── 权限闭环串联
+阶段一：MVP v0.1 补齐 ✅ 已完成
+├── ✅ Process IO 全双工
+├── ✅ IPC 服务端推送
+├── ✅ 事件序列语义贯通
+└── ✅ 权限闭环串联
 
 阶段二：Agent 智能增强
 ├── MemCube namespace + 共享

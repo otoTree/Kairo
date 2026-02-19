@@ -33,7 +33,6 @@ export class InMemoryGlobalBus implements EventBus {
   }
 
   async publish<T>(payload: Omit<KairoEvent<T>, "id" | "time" | "specversion">): Promise<string> {
-    // console.log('[EventBus] Publishing:', payload.type);
     const event: KairoEvent<T> = {
       ...payload,
       id: uuid(),
@@ -41,13 +40,13 @@ export class InMemoryGlobalBus implements EventBus {
       specversion: "1.0",
     };
 
-    // Emit to exact matches
+    // 自动填充 correlationId：如果未提供，则使用事件自身 ID 作为链的起点
+    if (!event.correlationId) {
+      event.correlationId = event.id;
+    }
+
     this.emitter.emit(event.type, event);
-    
-    // Note: 'mitt' * handler is triggered automatically by emit if we used the correct type definition
-    // But mitt's typescript types are a bit tricky with '*'. 
-    // If we look at mitt source, `emit` triggers `*` handlers.
-    
+
     return event.id;
   }
 

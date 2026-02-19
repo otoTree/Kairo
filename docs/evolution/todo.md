@@ -5,43 +5,43 @@
 
 ---
 
-## 阶段一：补齐 MVP v0.1 核心原语
+## 阶段一：补齐 MVP v0.1 核心原语 ✅
 
-### 1.1 Process IO 全双工通信
+### 1.1 Process IO 全双工通信 ✅
 
-- [ ] 扩展 `ProcessManager`，为每个进程维护 stdin/stdout/stderr 管道引用
-- [ ] 在 `ipc-server.ts` 注册 `process.stdin.write` 方法
-- [ ] 在 `ipc-server.ts` 注册 `process.stdout.subscribe` / `unsubscribe` 方法
-- [ ] 在 `ipc-server.ts` 注册 `process.wait` 和 `process.status` 方法
-- [ ] 新建 `stream-subscription.ts`，实现 Ring Buffer + 订阅管理
-- [ ] 添加 backpressure 机制（buffer 满时丢弃旧数据 + overflow 警告）
-- [ ] 为 Agent Runtime 注册 `kairo_process_write` / `kairo_process_read` 系统工具
+- [x] 扩展 `ProcessManager`，为每个进程维护 stdin/stdout/stderr 管道引用
+- [x] 在 `ipc-server.ts` 注册 `process.stdin.write` 方法
+- [x] 在 `ipc-server.ts` 注册 `process.stdout.subscribe` / `unsubscribe` 方法
+- [x] 在 `ipc-server.ts` 注册 `process.wait` 和 `process.status` 方法
+- [x] 新建 `stream-subscription.ts`，实现 Ring Buffer + 订阅管理
+- [x] 添加 backpressure 机制（buffer 满时丢弃旧数据 + overflow 警告）
+- [x] 为 Agent Runtime 注册 `kairo_process_write` / `kairo_process_status` / `kairo_process_wait` 系统工具
 - [ ] 编写集成测试：Agent 通过 IPC 与 Python REPL 交互
 
-### 1.2 IPC 服务端推送
+### 1.2 IPC 服务端推送 ✅
 
-- [ ] 在 `protocol.ts` 中定义 EVENT (0x03) 和 STREAM_CHUNK (0x04) 帧类型
-- [ ] 新建 `subscription-manager.ts`，管理 topic → 连接的映射
-- [ ] 在 `ipc-server.ts` 实现 `subscribe` / `unsubscribe` 方法
-- [ ] 实现 EVENT 帧推送逻辑（EventBus → 匹配订阅 → 发送帧）
-- [ ] 实现 STREAM_CHUNK 帧推送逻辑（stdout 数据 → 订阅者）
-- [ ] 更新 Zig IPC 客户端 (`os/src/wm/ipc.zig`) 支持新帧类型
+- [x] 在 `protocol.ts` 中定义 EVENT (0x03) 和 STREAM_CHUNK (0x04) 帧类型
+- [x] 新建 `subscription-manager.ts`，管理 topic → 连接的映射
+- [x] 在 `ipc-server.ts` 实现 `subscribe` / `unsubscribe` 方法
+- [x] 实现 EVENT 帧推送逻辑（EventBus → 匹配订阅 → 发送帧）
+- [x] 实现 STREAM_CHUNK 帧推送逻辑（stdout 数据 → 订阅者）
+- [x] 更新 Zig IPC 客户端 (`os/src/wm/ipc.zig`) 支持新帧类型
 - [ ] 编写集成测试：外部进程通过 IPC 订阅事件
 
-### 1.3 事件序列语义贯通
+### 1.3 事件序列语义贯通 ✅
 
-- [ ] 在 `in-memory-bus.ts` 的 `publish` 中自动填充 `correlationId`
-- [ ] 定义 `kairo.cancel` 事件类型
-- [ ] 在 Agent Runtime 中处理 `kairo.cancel`：终止对应进程 + 发布 cancelled 事件
-- [ ] 在工具调用链路中贯通 `actionId` → `tool.invoke` → `tool.result`
+- [x] 在 `in-memory-bus.ts` 的 `publish` 中自动填充 `correlationId`
+- [x] 定义 `kairo.cancel` 事件类型
+- [x] 在 Agent Runtime 中处理 `kairo.cancel`：终止对应进程 + 发布 cancelled 事件
+- [x] 在工具调用链路中贯通 `actionId` → `tool.invoke` → `tool.result`
 - [ ] 编写单元测试：验证 correlationId 传播
 
-### 1.4 权限闭环串联
+### 1.4 权限闭环串联 ✅
 
-- [ ] 将 `equipSkill` 中构建的 `sandboxConfig` 传递给 `BinaryRunner.run()`
-- [ ] 在 `ipc-server.ts` 添加连接身份关联（pid, skillId, runtimeToken）
-- [ ] 实现 `process.*` 方法的所有权检查
-- [ ] 在 `ProcessManager` 中追踪进程创建者
+- [x] 将 `equipSkill` 中构建的 `sandboxConfig` 传递给 `BinaryRunner.run()`
+- [x] 在 `ipc-server.ts` 添加连接身份关联（pid, skillId, runtimeToken）
+- [x] 实现 `process.*` 方法的所有权检查
+- [x] 在 `ProcessManager` 中追踪进程创建者
 - [ ] 编写集成测试：Skill 进程无法操作其他 Skill 的进程
 
 ---
