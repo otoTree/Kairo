@@ -9,6 +9,7 @@ import { AgentRuntime, type SystemTool } from "./runtime";
 import { InMemoryGlobalBus, RingBufferEventStore, type EventBus, type KairoEvent } from "../events";
 import type { Vault } from "../vault/vault";
 import type { MemCube } from "../memory/memcube";
+import { CapabilityRegistry, type AgentCapability } from "./capability-registry";
 
 export class AgentPlugin implements Plugin {
   readonly name = "agent";
@@ -20,6 +21,8 @@ export class AgentPlugin implements Plugin {
 
   private agents: Map<string, AgentRuntime> = new Map();
   private activeAgentId: string = "default";
+  // 能力注册表
+  public readonly capabilityRegistry = new CapabilityRegistry();
   
   private app?: Application;
   private actionListeners: ((action: any) => void)[] = [];
@@ -121,6 +124,45 @@ export class AgentPlugin implements Plugin {
 
     // Subscribe to user messages for routing
     this.globalBus.subscribe("kairo.user.message", this.handleUserMessage.bind(this));
+
+    // 订阅能力声明事件
+    this.globalBus.subscribe("kairo.agent.capability", (event: KairoEvent) => {
+      const data = event.data as AgentCapability;
+      if (data?.agentId && data?.name) {
+        this.capabilityRegistry.register(data);
+      }
+    });
+
+    // 注册任务委派工具
+    this.registerSystemTool({
+      name: "delegate_task",
+      description: "将任务委派给另一个 Agent",
+      inputSchema: {
+        type: "object",
+        properties: {
+          targetAgentId: { type: "string", description: "目标 Agent ID，留空则自动路由" },
+          description: { type: "string", description: "任务描述" },
+          input: { type: "object", description: "任务输入数据" },
+        },
+        required: ["description"],
+      },
+    }, async (args: any, context: any) => {
+      const targetId = args.targetAgentId || this.capabilityRegistry.findBestAgent(args.description)?.agentId || crypto.randomUUID();
+      const taskId = await this.delegateTask(context.agentId, targetId, {
+        description: args.description,
+        input: args.input,
+      });
+      return { taskId, targetAgentId: targetId };
+    });
+
+    // 注册能力查询工具
+    this.registerSystemTool({
+      name: "list_agent_capabilities",
+      description: "列出所有已注册 Agent 的能力",
+      inputSchema: { type: "object", properties: {} },
+    }, async () => {
+      return { capabilities: this.capabilityRegistry.getAllCapabilities() };
+    });
     
     // Subscribe to legacy messages and route to default
     this.globalBus.subscribe("kairo.legacy.*", async (event) => {
@@ -189,6 +231,35 @@ export class AgentPlugin implements Plugin {
       this.agents.set(id, runtime);
       runtime.start();
       return runtime;
+  }
+
+  /**
+   * 任务委派：将任务从父 Agent 发送给子 Agent
+   */
+  async delegateTask(parentId: string, childId: string, task: {
+    description: string;
+    input?: any;
+    timeout?: number;
+  }): Promise<string> {
+    if (!this.agents.has(childId)) {
+      this.spawnAgent(childId);
+    }
+
+    const taskId = crypto.randomUUID();
+
+    await this.globalBus.publish({
+      type: `kairo.agent.${childId}.task`,
+      source: `agent:${parentId}`,
+      data: {
+        taskId,
+        parentId,
+        description: task.description,
+        input: task.input,
+        timeout: task.timeout || 30000,
+      },
+    });
+
+    return taskId;
   }
 
   private async handleUserMessage(event: KairoEvent) {

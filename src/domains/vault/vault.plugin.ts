@@ -17,6 +17,8 @@ export class VaultPlugin implements Plugin {
   start() {
     const agent = this.app?.getService<AgentPlugin>("agent");
     if (agent) {
+        // 注入 EventBus 启用审计日志
+        this.vault.setEventBus(agent.globalBus);
         this.registerTools(agent);
     } else {
         console.warn("[Vault] AgentPlugin not found. Tools not registered.");
@@ -41,19 +43,25 @@ export class VaultPlugin implements Plugin {
 
       agent.registerSystemTool({
           name: "vault_resolve",
-          description: "Resolve a handle to its sensitive value. (Use with caution)",
+          description: "通过 token 解析 vault handle 获取敏感值",
           inputSchema: {
               type: "object",
               properties: {
-                  handleId: { type: "string", description: "The handle ID (e.g. vault:xyz)" }
+                  handleId: { type: "string", description: "The handle ID (e.g. vault:xyz)" },
+                  token: { type: "string", description: "运行时 token（可选，Agent 直接调用时可省略）" }
               },
               required: ["handleId"]
           }
       }, async (args) => {
-          const value = this.vault.resolve(args.handleId);
-          if (value === undefined) {
-              throw new Error("Invalid handle or expired.");
+          // Agent 直接调用时使用 deprecated resolve（向后兼容）
+          // Skill 进程通过 IPC 调用时使用 resolveWithToken
+          if (args.token) {
+              const value = this.vault.resolveWithToken(args.token, args.handleId);
+              if (value === undefined) throw new Error("访问被拒绝或句柄无效");
+              return { value };
           }
+          const value = this.vault.resolve(args.handleId);
+          if (value === undefined) throw new Error("Invalid handle or expired.");
           return { value };
       });
       

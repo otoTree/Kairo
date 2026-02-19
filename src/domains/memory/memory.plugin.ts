@@ -58,6 +58,7 @@ export class MemoryPlugin implements Plugin {
               type: "object",
               properties: {
                   content: { type: "string", description: "The content to memorize" },
+                  namespace: { type: "string", description: "命名空间，用于多 Agent 隔离（默认 default）" },
                   layer: { type: "string", enum: ["L1", "L2", "L3"], description: "Memory Layer (L1: Working, L2: Episodic, L3: Semantic). Default: L2" },
                   importance: { type: "number", description: "Importance (1-10)" },
                   metadata: { type: "object", description: "Optional metadata", additionalProperties: true }
@@ -66,6 +67,7 @@ export class MemoryPlugin implements Plugin {
           }
       }, async (args) => {
           const id = await this.memCube!.add(args.content, {
+              namespace: args.namespace,
               layer: args.layer as MemoryLayer,
               attributes: args.importance ? { importance: args.importance } : undefined,
               metadata: args.metadata
@@ -80,6 +82,7 @@ export class MemoryPlugin implements Plugin {
               type: "object",
               properties: {
                   query: { type: "string", description: "Search query" },
+                  namespace: { type: "string", description: "限定命名空间" },
                   limit: { type: "number", description: "Max number of results (default 5)" },
                   threshold: { type: "number", description: "Similarity threshold (0-1, default 0.0)" },
                   layer: { type: "array", items: { type: "string", enum: ["L1", "L2", "L3"] }, description: "Filter by layers" },
@@ -92,17 +95,18 @@ export class MemoryPlugin implements Plugin {
       }, async (args) => {
           const entries = await this.memCube!.recall({
               text: args.query,
+              namespace: args.namespace,
               limit: args.limit,
-                  threshold: args.threshold,
-                  filter: {
-                      layer: args.layer as MemoryLayer[],
-                      minImportance: args.minImportance,
-                      before: args.before,
-                      after: args.after
-                  }
-              });
-              return { entries };
+              threshold: args.threshold,
+              filter: {
+                  layer: args.layer as MemoryLayer[],
+                  minImportance: args.minImportance,
+                  before: args.before,
+                  after: args.after
+              }
           });
+          return { entries };
+      });
     
           agent.registerSystemTool({
               name: "memory_consolidate",
@@ -132,6 +136,55 @@ export class MemoryPlugin implements Plugin {
       }, async (args) => {
           await this.memCube!.reinforce(args.id, args.feedback as any);
           return { status: "success" };
+      });
+
+      // 跨命名空间共享记忆
+      agent.registerSystemTool({
+          name: "memory_share",
+          description: "跨命名空间共享记忆",
+          inputSchema: {
+              type: "object",
+              properties: {
+                  fromNamespace: { type: "string", description: "源命名空间" },
+                  toNamespace: { type: "string", description: "目标命名空间" },
+                  memoryId: { type: "string", description: "记忆 ID" }
+              },
+              required: ["fromNamespace", "toNamespace", "memoryId"]
+          }
+      }, async (args) => {
+          const newId = await this.memCube!.share(args.fromNamespace, args.toNamespace, args.memoryId);
+          return { newId, status: "success" };
+      });
+
+      // 导出记忆
+      agent.registerSystemTool({
+          name: "memory_export",
+          description: "导出记忆为 JSON 格式",
+          inputSchema: {
+              type: "object",
+              properties: {
+                  namespace: { type: "string", description: "限定命名空间（可选）" }
+              }
+          }
+      }, async (args) => {
+          const data = await this.memCube!.exportMemories(args.namespace);
+          return { data };
+      });
+
+      // 导入记忆
+      agent.registerSystemTool({
+          name: "memory_import",
+          description: "从 JSON 数据导入记忆",
+          inputSchema: {
+              type: "object",
+              properties: {
+                  data: { type: "string", description: "JSON 格式的记忆数据" }
+              },
+              required: ["data"]
+          }
+      }, async (args) => {
+          const count = await this.memCube!.importMemories(args.data);
+          return { count, status: "success" };
       });
       
       console.log("[Memory] Registered Memory Tools");

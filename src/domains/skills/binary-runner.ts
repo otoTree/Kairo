@@ -1,6 +1,8 @@
 import { ProcessManager } from '../kernel/process-manager';
 import type { SandboxRuntimeConfig } from '../sandbox/sandbox-config';
 import type { Vault } from '../vault/vault';
+import { createHash } from 'crypto';
+import { readFile } from 'fs/promises';
 
 export class BinaryRunner {
   private vault?: Vault;
@@ -13,38 +15,46 @@ export class BinaryRunner {
 
   /**
    * 启动二进制技能
-   * @param skillName 技能名称
-   * @param binaryPath 二进制文件绝对路径
-   * @param args 启动参数
-   * @param env 环境变量
-   * @param context 追踪上下文
-   * @param sandboxConfig 沙箱配置
    */
   async run(
-    skillName: string, 
-    binaryPath: string, 
-    args: string[] = [], 
-    env: Record<string, string> = {}, 
+    skillName: string,
+    binaryPath: string,
+    args: string[] = [],
+    env: Record<string, string> = {},
     context?: { correlationId?: string, causationId?: string },
     sandboxConfig?: SandboxRuntimeConfig
   ) {
     const id = `skill-${skillName}-${Date.now()}`;
-    
+
     let runtimeToken = "";
+    let binaryHash = "";
+
+    // 计算二进制 SHA256 指纹
+    try {
+      const binaryContent = await readFile(binaryPath);
+      binaryHash = createHash('sha256').update(binaryContent).digest('hex');
+    } catch (e) {
+      console.warn(`[BinaryRunner] 无法计算二进制指纹: ${binaryPath}`, e);
+    }
+
     if (this.vault) {
         runtimeToken = this.vault.createRuntimeToken({
             skillId: skillName,
-            // pid is not known yet
         });
+        // 将指纹绑定到 token
+        if (binaryHash) {
+            this.vault.registerFingerprint(runtimeToken, binaryHash);
+        }
     }
 
     console.log(`[BinaryRunner] Starting ${skillName} from ${binaryPath}`);
-    
+
     await this.processManager.spawn(id, [binaryPath, ...args], {
       env: {
-        ...env, // Do not resolve vault: handles to plaintext
+        ...env,
         KAIRO_SKILL_NAME: skillName,
         KAIRO_RUNTIME_TOKEN: runtimeToken,
+        KAIRO_BINARY_HASH: binaryHash,
         KAIRO_IPC_SOCKET: env.KAIRO_IPC_SOCKET || '/tmp/kairo-kernel.sock',
         ...(context?.correlationId ? { KAIRO_CORRELATION_ID: context.correlationId } : {}),
         ...(context?.causationId ? { KAIRO_CAUSATION_ID: context.causationId } : {}),
@@ -52,7 +62,7 @@ export class BinaryRunner {
       sandbox: sandboxConfig
     });
 
-    // If we want to bind PID to token, we need to do it here
+    // 绑定 PID 到 token
     const proc = this.processManager.getProcess(id);
     if (proc && this.vault && runtimeToken) {
         this.vault.updateTokenIdentity(runtimeToken, { pid: proc.pid });

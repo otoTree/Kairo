@@ -13,6 +13,7 @@ export interface MemoryAttributes {
 
 export interface MemoryEntry {
   id: string;
+  namespace?: string; // 命名空间，用于多 Agent 记忆隔离，默认 "default"
   content: string;
   layer: MemoryLayer;
   embedding?: number[];
@@ -25,6 +26,7 @@ export interface MemoryEntry {
 
 export interface MemoryQuery {
   text: string;
+  namespace?: string; // 查询时限定命名空间
   limit?: number;
   threshold?: number;
   filter?: {

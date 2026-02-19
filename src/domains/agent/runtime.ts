@@ -38,6 +38,7 @@ export interface AgentRuntimeOptions {
   onLog?: (log: any) => void;
   onActionResult?: (result: any) => void;
   systemTools?: SystemTool[];
+  capabilities?: { name: string; description: string; inputSchema?: any }[];
 }
 
 export class AgentRuntime {
@@ -63,6 +64,8 @@ export class AgentRuntime {
   private hasPendingUpdate: boolean = false;
   private tickHistory: number[] = [];
   private tickLock: Promise<void> = Promise.resolve();
+  // Agent 能力声明
+  private capabilities: { name: string; description: string; inputSchema?: any }[] = [];
 
   // 限制 pendingActions 和 eventBuffer 的最大容量，防止内存泄漏
   private static readonly MAX_PENDING_ACTIONS = 100;
@@ -94,6 +97,7 @@ export class AgentRuntime {
             this.registerSystemTool(t.definition, t.handler);
         });
     }
+    this.capabilities = options.capabilities || [];
   }
 
   registerSystemTool(definition: Tool, handler: (args: any, context: SystemToolContext) => Promise<any>) {
@@ -150,9 +154,29 @@ export class AgentRuntime {
     // 订阅取消事件
     unsubs.push(this.bus.subscribe("kairo.cancel", this.handleCancel.bind(this)));
 
+    // 订阅任务委派事件
+    unsubs.push(this.bus.subscribe(`kairo.agent.${this.id}.task`, this.handleTaskEvent.bind(this)));
+
     this.unsubscribe = () => {
       unsubs.forEach(u => u());
     };
+
+    // 广播能力声明
+    if (this.capabilities.length > 0) {
+      for (const cap of this.capabilities) {
+        this.publish({
+          type: "kairo.agent.capability",
+          source: `agent:${this.id}`,
+          data: {
+            agentId: this.id,
+            name: cap.name,
+            description: cap.description,
+            inputSchema: cap.inputSchema,
+            registeredAt: Date.now(),
+          },
+        });
+      }
+    }
 
     // Initial check (if any events were persisted/replayed?)
     // Usually we wait for events.
@@ -227,6 +251,28 @@ export class AgentRuntime {
         break;
       }
     }
+  }
+
+  /**
+   * 处理任务委派事件：将任务转为 Agent 可理解的消息
+   */
+  private handleTaskEvent(event: KairoEvent) {
+    if (!this.running) return;
+    const taskData = event.data as any;
+
+    this.eventBuffer.push({
+      ...event,
+      type: `kairo.agent.${this.id}.message`,
+      data: {
+        content: `[委派任务] 来自 Agent ${taskData.parentId}:\n任务: ${taskData.description}\n输入: ${JSON.stringify(taskData.input || {})}\n请完成此任务并回复结果。`,
+        taskId: taskData.taskId,
+        parentId: taskData.parentId,
+      },
+    });
+    if (this.eventBuffer.length > AgentRuntime.MAX_EVENT_BUFFER) {
+      this.eventBuffer = this.eventBuffer.slice(-AgentRuntime.MAX_EVENT_BUFFER);
+    }
+    this.onObservation();
   }
 
   private onObservation() {

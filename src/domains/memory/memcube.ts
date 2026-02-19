@@ -100,6 +100,7 @@ export class MemCube {
   }
 
   async add(content: string, options?: {
+      namespace?: string; // 命名空间，默认 "default"
       layer?: MemoryLayer;
       attributes?: MemoryAttributes;
       metadata?: Record<string, any>;
@@ -118,12 +119,15 @@ export class MemCube {
   }
 
   private async _addInternal(content: string, options?: {
+      namespace?: string;
       layer?: MemoryLayer;
       attributes?: MemoryAttributes;
       metadata?: Record<string, any>;
       ttl?: number;
   }): Promise<string> {
     if (!this.lmdb) await this.init();
+
+    const ns = options?.namespace || "default";
 
     // 1. Generate embedding
     const embeddingResponse = await this.ai.embed(content, { provider: this.embeddingProviderName });
@@ -138,33 +142,38 @@ export class MemCube {
         throw new Error(`Embedding dimension mismatch. Expected ${this.dimension}, got ${vector.length}`);
     }
 
-    // 3. IDs
-    const id = Math.random().toString(36).substring(7); // UUID
+    // 3. IDs — 使用复合键 {namespace}:{id}
+    const id = Math.random().toString(36).substring(7);
+    const compositeKey = `${ns}:${id}`;
     const intId = this.currentIntId++;
-    
+
     // Determine TTL
     let ttl = options?.ttl;
     if (!ttl && options?.layer === MemoryLayer.L1) {
         ttl = 3600; // Default 1 hour for L1
     }
 
+    const layer = options?.layer || MemoryLayer.L2;
     const entry: MemoryEntry = {
       id,
+      namespace: ns,
       content,
-      layer: options?.layer || MemoryLayer.L2, // Default to L2
-      embedding: vector, 
+      layer,
+      embedding: vector,
       attributes: options?.attributes,
       metadata: options?.metadata,
       createdAt: Date.now(),
       ttl,
       lastAccessed: Date.now()
     };
-    
+
     // 4. Write to Stores
-    // LMDB
-    await this.lmdb!.put(id, entry);
-    await this.lmdb!.put(`map:int:${intId}`, id); // Int -> UUID
-    await this.lmdb!.put(`map:uuid:${id}`, intId); // UUID -> Int (For deletion)
+    // LMDB — 使用复合键存储
+    await this.lmdb!.put(compositeKey, entry);
+    await this.lmdb!.put(`map:int:${intId}`, compositeKey); // Int -> compositeKey
+    await this.lmdb!.put(`map:uuid:${compositeKey}`, intId); // compositeKey -> Int
+    // 二级索引：按 layer 分类，GC 时避免全表扫描
+    await this.lmdb!.put(`idx:layer:${layer}:${compositeKey}`, true);
     await this.saveConfig(); // Update nextIntId
 
     // HNSW
@@ -173,14 +182,14 @@ export class MemCube {
         this.index!.resizeIndex(this.index!.getMaxElements() * 2);
     }
     this.index!.addPoint(vector, intId);
-    
-    // MiniSearch
-    this.miniSearch!.add({ id, content });
+
+    // MiniSearch — 使用 compositeKey 作为 id
+    this.miniSearch!.add({ id: compositeKey, content });
 
     // 5. Persist Indexes (Async)
     this.schedulePersistence();
 
-    console.log(`[MemCube] Added memory: ${id} (intId: ${intId}, layer: ${entry.layer})`);
+    console.log(`[MemCube] Added memory: ${compositeKey} (intId: ${intId}, layer: ${layer})`);
     return id;
   }
 
@@ -188,11 +197,12 @@ export class MemCube {
       await this.add(content);
   }
 
-  // Reinforce memory: Update importance and memory strength
-  async reinforce(id: string, feedback: "positive" | "negative" | "access"): Promise<void> {
+  // 强化记忆：更新重要性和记忆强度
+  async reinforce(id: string, feedback: "positive" | "negative" | "access", namespace?: string): Promise<void> {
       if (!this.lmdb) return;
-      
-      const entry = this.lmdb.get(id) as MemoryEntry;
+
+      const compositeKey = `${namespace || "default"}:${id}`;
+      const entry = this.lmdb.get(compositeKey) as MemoryEntry;
       if (!entry) return;
 
       entry.attributes = entry.attributes || { importance: 5, memoryStrength: 1 };
@@ -212,7 +222,7 @@ export class MemCube {
            entry.attributes.memoryStrength = (entry.attributes.memoryStrength || 1) + 0.1;
       }
       
-      await this.lmdb.put(id, entry);
+      await this.lmdb.put(compositeKey, entry);
       // No need to rebuild vector index as vector didn't change, but attributes did.
       // Ideally we might want to update some metadata index if we had one.
   }
@@ -224,8 +234,9 @@ export class MemCube {
     
     const text = typeof query === 'string' ? query : query.text;
     const limit = typeof query === 'object' && query.limit ? query.limit : 5;
-    const threshold = typeof query === 'object' && query.threshold ? query.threshold : 0.0; 
+    const threshold = typeof query === 'object' && query.threshold ? query.threshold : 0.0;
     const filter = typeof query === 'object' ? query.filter : undefined;
+    const namespace = typeof query === 'object' ? query.namespace : undefined;
     
     // RRF Constants
     const k = 60;
@@ -265,10 +276,10 @@ export class MemCube {
                 const distance = distances[i] ?? 1;
                 const similarity = 1 - distance;
                 
-                // Retrieve UUID
-                const uuid = this.lmdb!.get(`map:int:${intId}`) as string;
-                if (uuid) {
-                    addToCandidates(uuid, "vector", i + 1, similarity);
+                // Retrieve compositeKey
+                const compositeKey = this.lmdb!.get(`map:int:${intId}`) as string;
+                if (compositeKey) {
+                    addToCandidates(compositeKey, "vector", i + 1, similarity);
                 }
             }
         } catch (e) {
@@ -281,7 +292,7 @@ export class MemCube {
         // Search more than limit
         const allResults = this.miniSearch.search(text);
         const results = allResults.slice(0, limit * 2);
-        
+
         for (let i = 0; i < results.length; i++) {
             const res = results[i];
             if (res) {
@@ -296,6 +307,9 @@ export class MemCube {
     for (const cand of candidates.values()) {
         const entry = this.lmdb!.get(cand.id) as MemoryEntry;
         if (!entry) continue;
+
+        // 命名空间过滤
+        if (namespace && entry.namespace && entry.namespace !== namespace) continue;
 
         // Apply Filters
         if (filter) {
@@ -391,113 +405,115 @@ export class MemCube {
       }
   }
 
-  // Garbage Collection & Consolidation
+  // 垃圾回收：使用二级索引按 layer 扫描，避免全表扫描
   private async runGC() {
       if (!this.lmdb) return;
-      
+
       const now = Date.now();
       let deleteCount = 0;
       let promoteCount = 0;
 
-      // Iterate all entries (this is expensive for large DBs, but okay for local MVP)
-      // LMDB supports iteration.
-      for (const { key, value } of this.lmdb.getRange({})) {
-          if (typeof key !== 'string' || key.startsWith('sys:') || key.startsWith('map:')) continue;
-          
-          const entry = value as MemoryEntry;
-          
-          // 1. L1 TTL Cleanup
-          if (entry.layer === MemoryLayer.L1 && entry.ttl) {
+      // 1. L1 TTL 清理：只扫描 L1 索引
+      for (const { key } of this.lmdb.getRange({ start: 'idx:layer:L1:', end: 'idx:layer:L1:\xff' })) {
+          const compositeKey = (key as string).slice('idx:layer:L1:'.length);
+          const entry = this.lmdb.get(compositeKey) as MemoryEntry;
+          if (!entry) { await this.lmdb.remove(key); continue; }
+
+          if (entry.ttl) {
               const expireAt = entry.createdAt + (entry.ttl * 1000);
               if (now > expireAt) {
-                  await this.deleteMemory(key, entry);
+                  await this.deleteMemory(compositeKey, entry);
+                  await this.lmdb.remove(key);
                   deleteCount++;
-                  continue;
               }
           }
+      }
 
-          // 2. L2 Forgetting Curve
-          if (entry.layer === MemoryLayer.L2) {
-              // R = e^(-t/S)
-              const t = (now - (entry.lastAccessed || entry.createdAt)) / (1000 * 3600 * 24); // Time in days
-              const S = entry.attributes?.memoryStrength || 1.0;
-              const R = Math.exp(-t / S);
+      // 2. L2 遗忘曲线 + 晋升
+      for (const { key } of this.lmdb.getRange({ start: 'idx:layer:L2:', end: 'idx:layer:L2:\xff' })) {
+          const compositeKey = (key as string).slice('idx:layer:L2:'.length);
+          const entry = this.lmdb.get(compositeKey) as MemoryEntry;
+          if (!entry) { await this.lmdb.remove(key); continue; }
 
-              // If retention < 0.1, forget it
-              if (R < 0.1) {
-                   await this.deleteMemory(key, entry);
-                   deleteCount++;
-                   continue;
-              }
+          // R = e^(-t/S)
+          const t = (now - (entry.lastAccessed || entry.createdAt)) / (1000 * 3600 * 24);
+          const S = entry.attributes?.memoryStrength || 1.0;
+          const R = Math.exp(-t / S);
 
-              // 3. L2 -> L3 Promotion (Flashbulb Memory)
-              // If importance > 8 and Sentiment is strong (abs > 0.8) and not already L3
-              // Note: We don't move it, we copy it to L3 (or just change layer? Spec says copy/promote)
-              // Let's just change the layer to L3 to keep it simple and persistent.
-              const importance = entry.attributes?.importance || 0;
-              const sentiment = Math.abs(entry.attributes?.sentiment || 0);
-              
-              if (importance > 8 && sentiment > 0.8) {
-                  entry.layer = MemoryLayer.L3;
-                  entry.attributes = { ...entry.attributes, importance, flashbulb: true } as any;
-                  await this.lmdb.put(key, entry);
-                  promoteCount++;
-                  console.log(`[MemCube] Promoted memory ${key} to L3 (Flashbulb)`);
-              }
+          if (R < 0.1) {
+              await this.deleteMemory(compositeKey, entry);
+              await this.lmdb.remove(key);
+              deleteCount++;
+              continue;
+          }
+
+          // L2 → L3 晋升（闪光灯记忆）
+          const importance = entry.attributes?.importance || 0;
+          const sentiment = Math.abs(entry.attributes?.sentiment || 0);
+
+          if (importance > 8 && sentiment > 0.8) {
+              entry.layer = MemoryLayer.L3;
+              entry.attributes = { ...entry.attributes, importance, flashbulb: true } as any;
+              await this.lmdb.put(compositeKey, entry);
+              // 更新索引：删除 L2 索引，添加 L3 索引
+              await this.lmdb.remove(key);
+              await this.lmdb.put(`idx:layer:L3:${compositeKey}`, true);
+              promoteCount++;
+              console.log(`[MemCube] Promoted memory ${compositeKey} to L3 (Flashbulb)`);
           }
       }
 
       if (deleteCount > 0 || promoteCount > 0) {
           console.log(`[MemCube] GC Completed. Deleted: ${deleteCount}, Promoted: ${promoteCount}`);
-          // Trigger persist if we modified structure (miniSearch/HNSW removed in deleteMemory)
-          this.schedulePersistence(); 
+          this.schedulePersistence();
       }
   }
 
-  private async deleteMemory(id: string, entry: MemoryEntry) {
+  private async deleteMemory(compositeKey: string, entry: MemoryEntry) {
       if (!this.lmdb) return;
-      
-      // Remove from LMDB
-      await this.lmdb.remove(id);
-      
-      // Remove from MiniSearch
+
+      // 从 LMDB 删除主记录
+      await this.lmdb.remove(compositeKey);
+
+      // 从 MiniSearch 删除（使用 compositeKey 作为 id）
       if (this.miniSearch) {
-          this.miniSearch.remove({ id });
+          try { this.miniSearch.remove({ id: compositeKey }); } catch (e) { /* 忽略 */ }
       }
 
-      // Remove from HNSW
-      const intId = this.lmdb.get(`map:uuid:${id}`) as number | undefined;
+      // 从 HNSW 删除
+      const intId = this.lmdb.get(`map:uuid:${compositeKey}`) as number | undefined;
       if (intId !== undefined && this.index) {
           try {
-             // hnswlib-node markDelete: Marks the element as deleted
              this.index.markDelete(intId);
           } catch (e) {
-             console.warn(`[MemCube] Failed to markDelete in HNSW for ${id} (intId: ${intId})`, e);
+             console.warn(`[MemCube] Failed to markDelete in HNSW for ${compositeKey} (intId: ${intId})`, e);
           }
       }
-      
-      // Cleanup Maps
+
+      // 清理映射和索引
       if (intId !== undefined) {
           await this.lmdb.remove(`map:int:${intId}`);
-          await this.lmdb.remove(`map:uuid:${id}`);
+          await this.lmdb.remove(`map:uuid:${compositeKey}`);
       }
+      // 清理 layer 索引
+      await this.lmdb.remove(`idx:layer:${entry.layer}:${compositeKey}`);
   }
 
-  // Consolidate L2 memories into L3 summaries
+  // 合并 L2 记忆为 L3 摘要
   async consolidate(options?: { batchSize?: number }): Promise<string[]> {
       if (!this.lmdb) await this.init();
-      
+
       const batchSize = options?.batchSize || 10;
       const candidates: MemoryEntry[] = [];
 
-      // Scan L2 memories that haven't been consolidated recently (e.g. importance > 3)
-      // This is a naive scan. In production, we'd use an index or specific queue.
-      for (const { key, value } of this.lmdb!.getRange({})) {
-          if (typeof key !== 'string' || key.startsWith('sys:') || key.startsWith('map:')) continue;
-          const entry = value as MemoryEntry;
-          
-          if (entry.layer === MemoryLayer.L2 && (entry.attributes?.importance || 0) > 3) {
-              candidates.push(entry);
+      // 使用 L2 索引扫描，避免全表扫描
+      for (const { key } of this.lmdb!.getRange({ start: 'idx:layer:L2:', end: 'idx:layer:L2:\xff' })) {
+          const compositeKey = (key as string).slice('idx:layer:L2:'.length);
+          const entry = this.lmdb!.get(compositeKey) as MemoryEntry;
+          if (!entry) { await this.lmdb!.remove(key); continue; }
+
+          if ((entry.attributes?.importance || 0) > 3) {
+              candidates.push({ ...entry, id: compositeKey } as any);
               if (candidates.length >= batchSize) break;
           }
       }
@@ -537,6 +553,68 @@ export class MemCube {
           console.error("[MemCube] Consolidation failed", e);
           return [];
       }
+  }
+
+  /**
+   * 跨命名空间共享记忆
+   */
+  async share(fromNamespace: string, toNamespace: string, memoryId: string): Promise<string> {
+      if (!this.lmdb) await this.init();
+      const sourceKey = `${fromNamespace}:${memoryId}`;
+      const entry = this.lmdb!.get(sourceKey) as MemoryEntry;
+      if (!entry) throw new Error(`记忆 ${sourceKey} 不存在`);
+
+      return this.add(entry.content, {
+          namespace: toNamespace,
+          layer: entry.layer,
+          attributes: entry.attributes,
+          metadata: { ...entry.metadata, sharedFrom: fromNamespace, originalId: memoryId },
+          ttl: entry.ttl,
+      });
+  }
+
+  /**
+   * 导出指定命名空间的记忆为 JSON
+   */
+  async exportMemories(namespace?: string): Promise<string> {
+      if (!this.lmdb) await this.init();
+      const entries: Omit<MemoryEntry, 'embedding'>[] = [];
+
+      for (const { key, value } of this.lmdb!.getRange({})) {
+          if (typeof key !== 'string') continue;
+          if (key.startsWith('sys:') || key.startsWith('map:') || key.startsWith('idx:')) continue;
+
+          const entry = value as MemoryEntry;
+          if (namespace && entry.namespace !== namespace) continue;
+
+          // 导出时不含 embedding（太大），导入时重新生成
+          const { embedding, ...rest } = entry;
+          entries.push(rest);
+      }
+
+      return JSON.stringify({ version: 1, exportedAt: Date.now(), count: entries.length, entries });
+  }
+
+  /**
+   * 导入记忆
+   */
+  async importMemories(data: string): Promise<number> {
+      const parsed = JSON.parse(data);
+      if (!parsed.entries || !Array.isArray(parsed.entries)) {
+          throw new Error('无效的导入数据格式');
+      }
+      let count = 0;
+      for (const entry of parsed.entries) {
+          await this.add(entry.content, {
+              namespace: entry.namespace,
+              layer: entry.layer,
+              attributes: entry.attributes,
+              metadata: entry.metadata,
+              ttl: entry.ttl,
+          });
+          count++;
+      }
+      return count;
   }
 
   async close() {
