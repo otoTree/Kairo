@@ -15,6 +15,8 @@ export class MemCube {
   private storagePath: string;
   private dimension = 0;
   private currentIntId = 0;
+  // 互斥锁：防止并发 add() 导致 ID 冲突
+  private addLock: Promise<void> = Promise.resolve();
   
   // Configuration
   private readonly MAX_ELEMENTS = 10000; // HNSW max elements capacity
@@ -98,6 +100,24 @@ export class MemCube {
   }
 
   async add(content: string, options?: {
+      layer?: MemoryLayer;
+      attributes?: MemoryAttributes;
+      metadata?: Record<string, any>;
+      ttl?: number;
+  }): Promise<string> {
+    // 使用 Promise 链作为互斥锁，确保 ID 分配的原子性
+    return new Promise<string>((resolve, reject) => {
+      this.addLock = this.addLock.then(async () => {
+        try {
+          resolve(await this._addInternal(content, options));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  }
+
+  private async _addInternal(content: string, options?: {
       layer?: MemoryLayer;
       attributes?: MemoryAttributes;
       metadata?: Record<string, any>;

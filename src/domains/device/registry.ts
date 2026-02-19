@@ -65,7 +65,13 @@ export class DeviceRegistry {
   async loadConfig() {
     try {
       const content = await fs.readFile(this.configPath, 'utf-8');
-      const config = JSON.parse(content);
+      let config;
+      try {
+        config = JSON.parse(content);
+      } catch (parseErr) {
+        console.error(`[DeviceRegistry] Invalid JSON in config file ${this.configPath}:`, parseErr);
+        return;
+      }
       if (Array.isArray(config.mappings)) {
         this.mappings = config.mappings;
         console.log(`[DeviceRegistry] Loaded ${this.mappings.length} device mappings`);

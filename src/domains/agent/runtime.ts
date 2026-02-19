@@ -62,6 +62,11 @@ export class AgentRuntime {
   private isTicking: boolean = false;
   private hasPendingUpdate: boolean = false;
   private tickHistory: number[] = [];
+  private tickLock: Promise<void> = Promise.resolve();
+
+  // 限制 pendingActions 和 eventBuffer 的最大容量，防止内存泄漏
+  private static readonly MAX_PENDING_ACTIONS = 100;
+  private static readonly MAX_EVENT_BUFFER = 500;
   
   // Track pending actions for result correlation
   private pendingActions: Set<string> = new Set();
@@ -182,22 +187,22 @@ export class AgentRuntime {
     }
     
     this.eventBuffer.push(event);
+    // 防止 eventBuffer 无限增长
+    if (this.eventBuffer.length > AgentRuntime.MAX_EVENT_BUFFER) {
+      this.eventBuffer = this.eventBuffer.slice(-AgentRuntime.MAX_EVENT_BUFFER);
+    }
     this.onObservation();
   }
 
   private onObservation() {
     if (!this.running) return;
 
-    if (this.isTicking) {
-      this.hasPendingUpdate = true;
-      return;
-    }
-
-    this.processTick();
+    // 使用 Promise 链作为互斥锁，防止并发 tick
+    this.tickLock = this.tickLock.then(() => this.processTick());
   }
 
   private async processTick() {
-    if (!this.running || this.isTicking) return;
+    if (!this.running) return;
 
     this.isTicking = true;
     this.hasPendingUpdate = false; 
@@ -225,11 +230,6 @@ export class AgentRuntime {
       console.error("[AgentRuntime] Tick error:", error);
     } finally {
       this.isTicking = false;
-      // If new events arrived while we were ticking, run again
-      if (this.hasPendingUpdate && this.running) {
-        // Simple debounce/next-tick
-        setTimeout(() => this.processTick(), 0);
-      }
     }
   }
 
@@ -423,6 +423,11 @@ export class AgentRuntime {
               });
               
               this.pendingActions.add(actionEventId);
+              // 限制 pendingActions 大小，清理最早的条目
+              if (this.pendingActions.size > AgentRuntime.MAX_PENDING_ACTIONS) {
+                const oldest = this.pendingActions.values().next().value;
+                if (oldest) this.pendingActions.delete(oldest);
+              }
 
               try {
                  actionResult = await this.dispatchToolCall(action, { agentId: this.id, correlationId, causationId: actionEventId });

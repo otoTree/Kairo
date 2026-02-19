@@ -26,7 +26,12 @@ export class CheckpointRepository {
       .executeTakeFirst();
     
     if (!result) return null;
-    return JSON.parse(result.data);
+    try {
+      return JSON.parse(result.data);
+    } catch (e) {
+      console.error(`[CheckpointRepository] Failed to parse checkpoint ${id}:`, e);
+      return null;
+    }
   }
 
   async getLatest(): Promise<{ id: string; data: CheckpointData } | null> {
@@ -36,11 +41,16 @@ export class CheckpointRepository {
       .orderBy('created_at', 'desc')
       .limit(1)
       .executeTakeFirst();
-      
+
     if (!result) return null;
-    return {
-        id: result.id,
-        data: JSON.parse(result.data)
-    };
+    try {
+      return {
+          id: result.id,
+          data: JSON.parse(result.data)
+      };
+    } catch (e) {
+      console.error(`[CheckpointRepository] Failed to parse latest checkpoint:`, e);
+      return null;
+    }
   }
 }

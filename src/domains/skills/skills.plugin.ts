@@ -34,9 +34,6 @@ export class SkillsPlugin implements Plugin {
       } catch {
           return false;
       }
-  }
-
-  setup(app: Application) {
     this.app = app;
     app.registerService("skills", this);
 
@@ -244,7 +241,10 @@ export class SkillsPlugin implements Plugin {
 
       const scriptPath = path.join(skill.path, "scripts", args.script_name);
       
-      if (!scriptPath.startsWith(skill.path)) throw new Error("Invalid script path");
+      // 使用 path.resolve 规范化路径，防止 ../ 遍历攻击
+      const resolvedScript = path.resolve(scriptPath);
+      const resolvedSkillDir = path.resolve(skill.path);
+      if (!resolvedScript.startsWith(resolvedSkillDir + path.sep)) throw new Error("Invalid script path");
 
       try {
           await fs.access(scriptPath);
@@ -256,16 +256,16 @@ export class SkillsPlugin implements Plugin {
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'kairo-skill-'));
       
       try {
-          // Construct command
-          const cmd = `python3 "${scriptPath}" ${args.args.map(a => `"${a}"`).join(" ")}`;
-          const wrappedCmd = await SandboxManager.wrapWithSandbox(cmd);
-          
+          // 使用数组参数形式避免 shell 命令注入
+          const baseArgs = ["python3", scriptPath, ...args.args];
+          const wrappedCmd = await SandboxManager.wrapWithSandbox(baseArgs.join(" "));
+
           console.log(`[Skills] Executing in ${tempDir}: ${wrappedCmd}`);
 
           return await new Promise((resolve, reject) => {
-              const child = spawn(wrappedCmd, { 
+              const child = spawn(wrappedCmd, {
                   shell: true,
-                  cwd: tempDir 
+                  cwd: tempDir
               });
               
               let stdout = "";
@@ -297,10 +297,12 @@ export class SkillsPlugin implements Plugin {
               });
           });
       } finally {
-          // Cleanup temp dir
+          // 清理临时目录
           try {
              await fs.rm(tempDir, { recursive: true, force: true });
-          } catch {}
+          } catch (cleanupErr) {
+             console.warn(`[Skills] Failed to cleanup temp dir ${tempDir}:`, cleanupErr);
+          }
       }
   }
 }

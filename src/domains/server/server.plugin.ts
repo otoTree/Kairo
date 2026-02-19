@@ -25,8 +25,10 @@ export class ServerPlugin implements Plugin {
     
     const { upgradeWebSocket, websocket } = createBunWebSocket<ServerWebSocket<unknown>>();
 
+    // CORS: 从环境变量读取允许的来源，默认仅允许本地开发
+    const allowedOrigins = (process.env.KAIRO_CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000').split(',');
     this.app.use("/*", cors({
-        origin: '*', // For dev
+        origin: allowedOrigins,
         allowMethods: ['GET', 'POST', 'OPTIONS'],
         allowHeaders: ['Content-Type'],
         exposeHeaders: ['Content-Length'],

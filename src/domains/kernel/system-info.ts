@@ -49,7 +49,8 @@ export class SystemMonitor implements ISystemMonitor {
         temperature = temp.main;
       }
     } catch (e) {
-      // Ignore errors fetching temperature
+      // 温度传感器在某些平台不可用（如虚拟机），记录调试信息
+      console.debug("[SystemMonitor] Temperature sensor unavailable:", (e as Error).message);
     }
 
     let battery: { level: number; charging: boolean } | undefined;
@@ -62,7 +63,8 @@ export class SystemMonitor implements ISystemMonitor {
         };
       }
     } catch (e) {
-      // Ignore errors fetching battery
+      // 电池信息在桌面设备上不可用，记录调试信息
+      console.debug("[SystemMonitor] Battery info unavailable:", (e as Error).message);
     }
 
     return {

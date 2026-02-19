@@ -105,6 +105,16 @@ const KairoSurface = struct {
         switch (request) {
             .commit_ui_tree => |args| {
                 const payload = std.mem.span(args.json_payload);
+                // 输入验证：限制 payload 大小，防止 DoS
+                const MAX_PAYLOAD_SIZE = 64 * 1024; // 64KB
+                if (payload.len > MAX_PAYLOAD_SIZE) {
+                    log.err("KDP: payload 超过大小限制 ({} > {})", .{ payload.len, MAX_PAYLOAD_SIZE });
+                    return;
+                }
+                if (payload.len == 0) {
+                    log.warn("KDP: 收到空 payload，忽略", .{});
+                    return;
+                }
                 log.info("KDP: Received UI Tree: {s}", .{payload});
                 self.renderUITree(payload);
             },

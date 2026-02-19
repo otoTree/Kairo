@@ -73,6 +73,35 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* 阻止 socketpair(AF_UNIX, ...) 以防止通过 socketpair 绕过 */
+    rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(socketpair), 1,
+                          SCMP_A0(SCMP_CMP_EQ, AF_UNIX));
+    if (rc < 0) {
+        fprintf(stderr, "Error: Failed to add socketpair rule: %s\n", strerror(-rc));
+        seccomp_release(ctx);
+        return 1;
+    }
+
+#ifdef __NR_socketcall
+    /* 在 32 位 x86 上阻止 socketcall() 系统调用
+     * socketcall 将所有 socket 操作复用到一个系统调用中
+     * arg0 = call number (SYS_SOCKET=1, SYS_SOCKETPAIR=8)
+     * 由于无法在 BPF 中检查 socketcall 的间接参数，
+     * 这里直接阻止 SYS_SOCKET 和 SYS_SOCKETPAIR 子调用 */
+    rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(socketcall), 1,
+                          SCMP_A0(SCMP_CMP_EQ, 1 /* SYS_SOCKET */));
+    if (rc < 0) {
+        fprintf(stderr, "Warning: Failed to add socketcall(SYS_SOCKET) rule: %s\n", strerror(-rc));
+        /* 非致命错误，在 64 位系统上 socketcall 不存在 */
+    }
+
+    rc = seccomp_rule_add(ctx, SCMP_ACT_ERRNO(EPERM), SCMP_SYS(socketcall), 1,
+                          SCMP_A0(SCMP_CMP_EQ, 8 /* SYS_SOCKETPAIR */));
+    if (rc < 0) {
+        fprintf(stderr, "Warning: Failed to add socketcall(SYS_SOCKETPAIR) rule: %s\n", strerror(-rc));
+    }
+#endif
+
     /* Export the filter to a file */
     int fd = open(output_file, O_CREAT | O_WRONLY | O_TRUNC, 0600);
     if (fd < 0) {

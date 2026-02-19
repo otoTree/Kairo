@@ -108,7 +108,11 @@ async function bootstrap() {
     // Setup Server
     const server = new ServerPlugin(
       Number(process.env.PORT || 3000),
-      process.env.KAIRO_TOKEN || "kairo_default_secret"
+      process.env.KAIRO_TOKEN || (() => {
+        const generated = require("crypto").randomBytes(32).toString("hex");
+        console.warn("[Security] KAIRO_TOKEN 未设置，已自动生成临时密钥。生产环境请通过环境变量配置。");
+        return generated;
+      })()
     );
     await app.use(server);
 

@@ -74,7 +74,11 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
                 .node = ev.id.getNode() catch null,
             };
             ev.id.setListener(*Window, windowListener, win);
-            ctx.windows.append(ctx.allocator, win) catch return;
+            ctx.windows.append(ctx.allocator, win) catch {
+                // 分配失败时释放已创建的 Window，防止内存泄漏
+                ctx.allocator.destroy(win);
+                return;
+            };
             std.debug.print("WM: new window (total: {})\n", .{ctx.windows.items.len});
         },
         .output => |ev| {
@@ -85,7 +89,11 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
                 .height = 0,
             };
             ev.id.setListener(*Output, outputListener, out);
-            ctx.outputs.append(ctx.allocator, out) catch return;
+            ctx.outputs.append(ctx.allocator, out) catch {
+                // 分配失败时释放已创建的 Output，防止内存泄漏
+                ctx.allocator.destroy(out);
+                return;
+            };
             std.debug.print("WM: new output\n", .{});
         },
         .manage_start => {
