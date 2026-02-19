@@ -265,15 +265,25 @@ pub fn main() !void {
     if (display.flush() != .SUCCESS) return error.RoundtripFailed;
     std.debug.print("After second roundtrip: windows={}, outputs={}\n", .{ ctx.windows.items.len, ctx.outputs.items.len });
 
-    // Phase 4: Test KDP
+    // Phase 4: KDP - 发送 "Hello Kairo" UI 树
     if (ctx.kairo_display != null and ctx.compositor_global != null) {
         if (ctx.compositor_global.?.createSurface()) |surface| {
             if (ctx.kairo_display.?.getKairoSurface(surface)) |k_surface| {
                 std.debug.print("Created kairo_surface\n", .{});
 
-                const json = "{\"type\":\"root\",\"children\":[]}";
+                // 构建包含背景矩形和文本的 UI 树
+                const json =
+                    \\{"type":"root","children":[
+                    \\  {"type":"rect","x":50,"y":50,"width":280,"height":60,
+                    \\   "color":[0.15,0.15,0.25,0.92]},
+                    \\  {"type":"rect","x":50,"y":50,"width":280,"height":3,
+                    \\   "color":[0.4,0.6,1.0,1.0]},
+                    \\  {"type":"text","x":62,"y":62,"text":"Hello Kairo",
+                    \\   "color":[0.9,0.95,1.0,1.0],"scale":3}
+                    \\]}
+                ;
                 k_surface.commitUiTree(json);
-                std.debug.print("Sent UI Tree: {s}\n", .{json});
+                std.debug.print("Sent Hello Kairo UI Tree\n", .{});
             } else |err| {
                 std.debug.print("Failed to create kairo_surface: {}\n", .{err});
             }

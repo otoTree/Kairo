@@ -39,7 +39,7 @@
 *   **任务**:
     *   [x] Implement `Master/Stack` layout logic: first window takes left half, subsequent windows share right half.
     *   [x] Replace River default `rivertile` with `kairo-wm` as layout manager.
-    *   [ ] Verify: Open multiple terminal windows and observe if the layout is as expected.
+    *   [x] Verify: Open multiple terminal windows and observe if the layout is as expected.
 
 ---
 
@@ -57,7 +57,7 @@
 ### 3.2 混合合成原型 (Hybrid Composition)
 *   **任务**:
     *   [x] **Agent 占位**: 在 `kairo-wm` 中添加逻辑，当收到 Kernel 的 "Agent Active" 信号时，强制预留屏幕右侧 30% 空间。
-    *   [ ] **测试**: 模拟发送信号，观察现有窗口是否自动挤压变形。
+    *   [x] **测试**: 模拟发送信号，观察现有窗口是否自动挤压变形。
 
 ---
 
@@ -72,10 +72,10 @@
 
 ### 4.2 渲染器实现
 *   **任务**:
-    *   [ ] 在 River 渲染循环 (render loop) 中注入 Overlay 绘制逻辑 (目前仅打印日志)。
-    *   [ ] 实现简单的矩形和文本绘制 (使用 Cairo 或 OpenGL)。
+    *   [x] 在 River 渲染循环 (render loop) 中注入 Overlay 绘制逻辑 (通过 Scene Graph overlay 层)。
+    *   [x] 实现简单的矩形和文本绘制 (使用 wlroots SceneRect + 内嵌 8x8 位图字体)。
     *   [x] **Kernel 端**: 在 `kairo-wm` 中实现 KDP Client，发送一个 JSON UI 树。
-    *   [ ] **联调**: Kernel 发送指令，屏幕上出现一个悬浮的“Hello Kairo” 文本框。
+    *   [x] **联调**: Kernel 发送指令，屏幕上出现一个悬浮的"Hello Kairo" 文本框。
 
 ---
 

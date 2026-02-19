@@ -195,6 +195,7 @@ const LogScope = enum {
     wm,
     xdg,
     xwayland,
+    kairo_display,
 };
 
 var log_scopes: std.EnumSet(LogScope) = std.EnumSet(LogScope).initFull();

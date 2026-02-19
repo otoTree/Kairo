@@ -340,7 +340,8 @@ fn blocklist(server: *Server, global: *const wl.Global) bool {
         global == server.input_manager.virtual_pointer_manager.global or
         global == server.input_manager.virtual_keyboard_manager.global or
         global == server.input_manager.input_method_manager.global or
-        global == server.lock_manager.wlr_manager.global;
+        global == server.lock_manager.wlr_manager.global or
+        global == server.kairo_display.global;
 }
 
 /// Handle SIGINT and SIGTERM by gracefully stopping the server
