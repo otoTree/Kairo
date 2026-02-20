@@ -1,8 +1,9 @@
 import { DeviceRegistry } from './registry';
 import type { IDeviceDriver } from './drivers/types';
 import { MockSerialDriver } from './drivers/mock-serial';
-
+import { MockCameraDriver } from './drivers/mock-camera';
 import { NativeSerialDriver } from './drivers/serial';
+import { GPIODriver } from './drivers/gpio';
 
 export class DeviceManager {
   private drivers = new Map<string, IDeviceDriver>();
@@ -24,18 +25,31 @@ export class DeviceManager {
         throw new Error(`Device ${deviceId} is not claimed (status: ${device.status})`);
     }
 
-    // Create driver based on type
+    // 根据设备类型创建驱动
     let driver: IDeviceDriver;
+    const useMock = process.platform === 'darwin' || process.env.KAIRO_MOCK_DEVICES === 'true' || device.metadata?.mock;
+
     switch (device.type) {
       case 'serial':
-        // Check if we should use Mock
-        if (process.platform === 'darwin' || process.env.KAIRO_MOCK_DEVICES === 'true' || device.metadata?.mock) {
+        if (useMock) {
             driver = new MockSerialDriver(deviceId, [
                 { match: 'PING', reply: 'PONG', delay: 100 },
                 { match: 'HELLO', reply: 'WORLD', delay: 500 }
             ]);
         } else {
             driver = new NativeSerialDriver(deviceId, device.path);
+        }
+        break;
+      case 'camera':
+        // Camera 驱动：目前仅支持 Mock
+        driver = new MockCameraDriver(deviceId);
+        break;
+      case 'gpio':
+        if (useMock) {
+            // GPIO 在非 Linux 环境下不可用，使用 Mock Serial 替代
+            driver = new MockSerialDriver(deviceId, []);
+        } else {
+            driver = new GPIODriver(deviceId);
         }
         break;
       default:

@@ -10,6 +10,8 @@ import type { AgentPlugin } from "../agent/agent.plugin";
 import { StateRepository } from "../database/repositories/state-repository";
 import { CheckpointRepository } from "../database/repositories/checkpoint-repository";
 import { KernelStateManager } from "./state-manager";
+import { ServiceManager } from "./service-manager";
+import { DBusBridge } from "./dbus-bridge";
 
 import { Vault } from "../vault/vault";
 import { rootLogger } from "../observability/logger";
@@ -25,6 +27,8 @@ export class KernelPlugin implements Plugin {
   public readonly stateRepository: StateRepository;
   public readonly checkpointRepository: CheckpointRepository;
   public readonly stateManager: KernelStateManager;
+  public readonly serviceManager: ServiceManager;
+  public readonly dbusBridge: DBusBridge;
   private bridge?: KernelEventBridge;
 
   private app?: Application;
@@ -38,6 +42,8 @@ export class KernelPlugin implements Plugin {
     this.shellManager = new ShellManager();
     this.ipcServer = new IPCServer(this.processManager, this.systemMonitor, this.deviceRegistry);
     this.stateManager = new KernelStateManager(this.stateRepository, this.checkpointRepository);
+    this.serviceManager = new ServiceManager(this.processManager);
+    this.dbusBridge = new DBusBridge();
   }
 
   setup(app: Application): void {
@@ -100,6 +106,13 @@ export class KernelPlugin implements Plugin {
       this.registerTerminalTools(agentPlugin);
       this.registerStateTools(agentPlugin);
       this.registerProcessIOTools(agentPlugin);
+      this.registerServiceTools(agentPlugin);
+      this.registerDBusTools(agentPlugin);
+
+      // 启动 D-Bus 桥接
+      await this.dbusBridge.connect(agentPlugin.globalBus).catch((e: unknown) => {
+        rootLogger.warn("[Kernel] D-Bus bridge failed to connect:", e);
+      });
 
     } catch (e) {
       rootLogger.warn("[Kernel] AgentPlugin not found. Event Bridge & Tools disabled.");
@@ -253,5 +266,80 @@ export class KernelPlugin implements Plugin {
     });
 
     rootLogger.info("[Kernel] Registered Process IO Tools");
+  }
+
+  /**
+   * 注册服务管理工具
+   */
+  private registerServiceTools(agent: AgentPlugin) {
+    agent.registerSystemTool({
+      name: "kairo_service_list",
+      description: "列出所有已注册的服务及其状态",
+      inputSchema: { type: "object", properties: {} },
+    }, async () => {
+      return { services: this.serviceManager.listServices() };
+    });
+
+    agent.registerSystemTool({
+      name: "kairo_service_restart",
+      description: "重启指定服务",
+      inputSchema: {
+        type: "object",
+        properties: { serviceId: { type: "string", description: "服务 ID" } },
+        required: ["serviceId"],
+      },
+    }, async (args) => {
+      await this.serviceManager.restartService(args.serviceId);
+      return { status: "restarted", serviceId: args.serviceId };
+    });
+
+    rootLogger.info("[Kernel] Registered Service Management Tools");
+  }
+
+  /**
+   * 注册 D-Bus 相关工具（systemd 控制、网络查询）
+   */
+  private registerDBusTools(agent: AgentPlugin) {
+    agent.registerSystemTool({
+      name: "kairo_systemd_status",
+      description: "查询 systemd 服务状态",
+      inputSchema: {
+        type: "object",
+        properties: { unitName: { type: "string", description: "服务单元名，如 nginx.service" } },
+        required: ["unitName"],
+      },
+    }, async (args) => {
+      return await this.dbusBridge.getUnitStatus(args.unitName);
+    });
+
+    agent.registerSystemTool({
+      name: "kairo_systemd_control",
+      description: "控制 systemd 服务（start/stop/restart）",
+      inputSchema: {
+        type: "object",
+        properties: {
+          unitName: { type: "string", description: "服务单元名" },
+          action: { type: "string", description: "操作：start / stop / restart" },
+        },
+        required: ["unitName", "action"],
+      },
+    }, async (args) => {
+      switch (args.action) {
+        case 'start': return await this.dbusBridge.startUnit(args.unitName);
+        case 'stop': return await this.dbusBridge.stopUnit(args.unitName);
+        case 'restart': return await this.dbusBridge.restartUnit(args.unitName);
+        default: throw new Error(`未知操作: ${args.action}`);
+      }
+    });
+
+    agent.registerSystemTool({
+      name: "kairo_network_status",
+      description: "查询网络连接状态（通过 NetworkManager）",
+      inputSchema: { type: "object", properties: {} },
+    }, async () => {
+      return await this.dbusBridge.getNetworkState();
+    });
+
+    rootLogger.info("[Kernel] Registered D-Bus Tools");
   }
 }

@@ -5,6 +5,32 @@ import type { StateRepository } from '../database/repositories/state-repository'
 
 export type DeviceType = 'serial' | 'camera' | 'audio_in' | 'audio_out' | 'gpio';
 
+/**
+ * 简易异步互斥锁，用于 claim/release 并发控制
+ */
+class AsyncMutex {
+  private locked = false;
+  private queue: (() => void)[] = [];
+
+  async acquire(): Promise<() => void> {
+    return new Promise((resolve) => {
+      const tryAcquire = () => {
+        if (!this.locked) {
+          this.locked = true;
+          resolve(() => {
+            this.locked = false;
+            const next = this.queue.shift();
+            if (next) next();
+          });
+        } else {
+          this.queue.push(tryAcquire);
+        }
+      };
+      tryAcquire();
+    });
+  }
+}
+
 export interface DeviceInfo {
   id: string;          // e.g., "dev_serial_01" or alias
   type: DeviceType;
@@ -40,6 +66,15 @@ export class DeviceRegistry {
   public readonly events: Emitter<DeviceRegistryEvents> = mitt<DeviceRegistryEvents>();
   private mappings: DeviceMapping[] = [];
   private pendingClaims = new Map<string, DeviceClaim>();
+  // 每个设备一把互斥锁，防止并发 claim/release 竞态
+  private claimLocks = new Map<string, AsyncMutex>();
+
+  private getLock(deviceId: string): AsyncMutex {
+    if (!this.claimLocks.has(deviceId)) {
+      this.claimLocks.set(deviceId, new AsyncMutex());
+    }
+    return this.claimLocks.get(deviceId)!;
+  }
 
   constructor(
     private configPath: string = path.join(process.cwd(), 'config', 'devices.json'),
@@ -131,72 +166,77 @@ export class DeviceRegistry {
   }
 
   async claim(deviceId: string, ownerId: string): Promise<boolean> {
-    const device = this.devices.get(deviceId);
-    if (!device) {
-        throw new Error(`Device ${deviceId} not found`);
-    }
+    const release = await this.getLock(deviceId).acquire();
+    try {
+      const device = this.devices.get(deviceId);
+      if (!device) {
+          throw new Error(`Device ${deviceId} not found`);
+      }
 
-    if (device.status === 'busy' && device.owner !== ownerId) {
-        throw new Error(`Device ${deviceId} is already claimed by ${device.owner}`);
-    }
+      if (device.status === 'busy' && device.owner !== ownerId) {
+          throw new Error(`Device ${deviceId} is already claimed by ${device.owner}`);
+      }
 
-    if (device.status === 'error') {
-        throw new Error(`Device ${deviceId} is in error state`);
-    }
+      if (device.status === 'error') {
+          throw new Error(`Device ${deviceId} is in error state`);
+      }
 
-    device.status = 'busy';
-    device.owner = ownerId;
-    this.devices.set(deviceId, device); // Update map
-    
-    if (this.stateRepo) {
-      await this.stateRepo.save(`device:claim:${deviceId}`, {
-        deviceId,
-        ownerId,
-        claimedAt: Date.now()
-      });
-    }
+      device.status = 'busy';
+      device.owner = ownerId;
+      this.devices.set(deviceId, device);
 
-    this.events.emit('device:claimed', { id: deviceId, owner: ownerId });
-    console.log(`[DeviceRegistry] Device ${deviceId} claimed by ${ownerId}`);
-    return true;
+      if (this.stateRepo) {
+        await this.stateRepo.save(`device:claim:${deviceId}`, {
+          deviceId,
+          ownerId,
+          claimedAt: Date.now()
+        });
+      }
+
+      this.events.emit('device:claimed', { id: deviceId, owner: ownerId });
+      console.log(`[DeviceRegistry] Device ${deviceId} claimed by ${ownerId}`);
+      return true;
+    } finally {
+      release();
+    }
   }
 
   async release(deviceId: string, ownerId: string): Promise<boolean> {
-    const device = this.devices.get(deviceId);
-    if (!device) {
-         // If device is disconnected but we have a pending claim?
-         // Spec says: "Recover Device Claims".
-         // If we release a device that is not currently connected (but claimed in DB), we should clear DB.
-         // But `devices.get` only checks connected devices.
-         // We should also check pendingClaims.
-         if (this.pendingClaims.has(deviceId)) {
-             const claim = this.pendingClaims.get(deviceId);
-             if (claim && claim.ownerId === ownerId) {
-                 this.pendingClaims.delete(deviceId);
-                 if (this.stateRepo) {
-                     await this.stateRepo.delete(`device:claim:${deviceId}`);
-                 }
-                 return true;
-             }
-         }
-         throw new Error(`Device ${deviceId} not found`);
-    }
+    const releaseLock = await this.getLock(deviceId).acquire();
+    try {
+      const device = this.devices.get(deviceId);
+      if (!device) {
+           if (this.pendingClaims.has(deviceId)) {
+               const claim = this.pendingClaims.get(deviceId);
+               if (claim && claim.ownerId === ownerId) {
+                   this.pendingClaims.delete(deviceId);
+                   if (this.stateRepo) {
+                       await this.stateRepo.delete(`device:claim:${deviceId}`);
+                   }
+                   return true;
+               }
+           }
+           throw new Error(`Device ${deviceId} not found`);
+      }
 
-    if (device.owner !== ownerId) {
-        throw new Error(`Device ${deviceId} is not claimed by ${ownerId}`);
-    }
+      if (device.owner !== ownerId) {
+          throw new Error(`Device ${deviceId} is not claimed by ${ownerId}`);
+      }
 
-    device.status = 'available';
-    device.owner = null;
-    this.devices.set(deviceId, device);
-    
-    if (this.stateRepo) {
-      await this.stateRepo.delete(`device:claim:${deviceId}`);
-    }
+      device.status = 'available';
+      device.owner = null;
+      this.devices.set(deviceId, device);
 
-    this.events.emit('device:released', { id: deviceId, owner: ownerId });
-    console.log(`[DeviceRegistry] Device ${deviceId} released by ${ownerId}`);
-    return true;
+      if (this.stateRepo) {
+        await this.stateRepo.delete(`device:claim:${deviceId}`);
+      }
+
+      this.events.emit('device:released', { id: deviceId, owner: ownerId });
+      console.log(`[DeviceRegistry] Device ${deviceId} released by ${ownerId}`);
+      return true;
+    } finally {
+      releaseLock();
+    }
   }
   
   forceRelease(deviceId: string) {

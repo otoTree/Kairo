@@ -87,13 +87,24 @@ const KairoSurface = struct {
     resource: *kairo.SurfaceV1,
     /// overlay 子树，用于管理所有渲染节点的生命周期
     overlay_tree: ?*wlr.SceneTree = null,
+    /// 可交互元素的命中区域列表（用于 user_action 事件）
+    hit_regions: std.ArrayList(HitRegion) = std.ArrayList(HitRegion).init(std.heap.c_allocator),
+
+    const HitRegion = struct {
+        element_id: []const u8,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        action_type: []const u8, // "click", "submit" 等
+    };
 
     fn handleDestroy(resource: *kairo.SurfaceV1, self: *KairoSurface) void {
         _ = resource;
-        // 销毁 overlay 子树（自动销毁所有子节点）
         if (self.overlay_tree) |tree| {
             tree.node.destroy();
         }
+        self.hit_regions.deinit();
         std.heap.c_allocator.destroy(self);
     }
 
@@ -105,8 +116,7 @@ const KairoSurface = struct {
         switch (request) {
             .commit_ui_tree => |args| {
                 const payload = std.mem.span(args.json_payload);
-                // 输入验证：限制 payload 大小，防止 DoS
-                const MAX_PAYLOAD_SIZE = 64 * 1024; // 64KB
+                const MAX_PAYLOAD_SIZE = 64 * 1024;
                 if (payload.len > MAX_PAYLOAD_SIZE) {
                     log.err("KDP: payload 超过大小限制 ({} > {})", .{ payload.len, MAX_PAYLOAD_SIZE });
                     return;
@@ -124,15 +134,38 @@ const KairoSurface = struct {
         }
     }
 
+    /// 处理指针点击事件，进行命中测试并发送 user_action
+    pub fn handlePointerClick(self: *KairoSurface, x: i32, y: i32) void {
+        for (self.hit_regions.items) |region| {
+            if (x >= region.x and x < region.x + region.width and
+                y >= region.y and y < region.y + region.height)
+            {
+                // 命中！发送 user_action 事件
+                log.info("KDP: user_action hit: {s} at ({}, {})", .{ region.element_id, x, y });
+                self.sendUserAction(region.element_id, region.action_type, "{}");
+                return;
+            }
+        }
+    }
+
+    /// 通过 Wayland 协议发送 user_action 事件到客户端
+    fn sendUserAction(self: *KairoSurface, element_id: []const u8, action_type: []const u8, payload: []const u8) void {
+        self.resource.sendUserAction(
+            @ptrCast(element_id.ptr),
+            @ptrCast(action_type.ptr),
+            @ptrCast(payload.ptr),
+        );
+    }
+
     /// 解析 JSON UI 树并渲染到 overlay 场景层
     fn renderUITree(self: *KairoSurface, json_payload: [:0]const u8) void {
-        // 清理旧的 overlay 节点
+        // 清理旧的 overlay 节点和命中区域
         if (self.overlay_tree) |tree| {
             tree.node.destroy();
             self.overlay_tree = null;
         }
+        self.hit_regions.clearRetainingCapacity();
 
-        // 在 overlay 层创建新的子树
         const overlay_parent = self.server.scene.layers.overlay;
         const tree = overlay_parent.createSceneTree() catch {
             log.err("KDP: 无法创建 overlay 子树", .{});
@@ -140,7 +173,6 @@ const KairoSurface = struct {
         };
         self.overlay_tree = tree;
 
-        // 解析 JSON
         const parsed = std.json.parseFromSlice(UIElement, std.heap.c_allocator, json_payload, .{
             .ignore_unknown_fields = true,
         }) catch |err| {
@@ -149,9 +181,9 @@ const KairoSurface = struct {
         };
         defer parsed.deinit();
 
-        // 递归渲染 UI 元素
-        renderElement(tree, &parsed.value);
-        log.info("KDP: UI 树渲染完成", .{});
+        // 递归渲染 UI 元素，同时收集可交互区域
+        renderElementWithHitTest(tree, &parsed.value, self, 0, 0);
+        log.info("KDP: UI 树渲染完成 (可交互区域: {})", .{self.hit_regions.items.len});
     }
 };
 
@@ -161,6 +193,7 @@ const KairoSurface = struct {
 
 const UIElement = struct {
     @"type": []const u8 = "",
+    id: ?[]const u8 = null,
     x: ?i32 = null,
     y: ?i32 = null,
     width: ?i32 = null,
@@ -171,7 +204,41 @@ const UIElement = struct {
     children: ?[]const UIElement = null,
 };
 
-/// 递归渲染 UI 元素到场景树
+/// 递归渲染 UI 元素到场景树（同时收集可交互区域用于命中测试）
+fn renderElementWithHitTest(parent: *wlr.SceneTree, element: *const UIElement, surface: *KairoSurface, offset_x: i32, offset_y: i32) void {
+    const elem_type = element.@"type";
+    const ex = (element.x orelse 0) + offset_x;
+    const ey = (element.y orelse 0) + offset_y;
+
+    if (std.mem.eql(u8, elem_type, "rect")) {
+        renderRect(parent, element);
+    } else if (std.mem.eql(u8, elem_type, "text")) {
+        renderText(parent, element);
+    }
+
+    // 如果元素有 id 且是可交互类型（rect 或 button），注册命中区域
+    if (element.id) |eid| {
+        const w = element.width orelse 100;
+        const h = element.height orelse 40;
+        surface.hit_regions.append(.{
+            .element_id = eid,
+            .x = ex,
+            .y = ey,
+            .width = w,
+            .height = h,
+            .action_type = "click",
+        }) catch {};
+    }
+
+    // 递归渲染子元素
+    if (element.children) |children| {
+        for (children) |*child| {
+            renderElementWithHitTest(parent, child, surface, ex, ey);
+        }
+    }
+}
+
+/// 兼容旧接口：不收集命中区域的渲染
 fn renderElement(parent: *wlr.SceneTree, element: *const UIElement) void {
     const elem_type = element.@"type";
 
@@ -181,7 +248,6 @@ fn renderElement(parent: *wlr.SceneTree, element: *const UIElement) void {
         renderText(parent, element);
     }
 
-    // 递归渲染子元素
     if (element.children) |children| {
         for (children) |*child| {
             renderElement(parent, child);
