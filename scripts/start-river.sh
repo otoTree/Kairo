@@ -9,6 +9,12 @@ if ! rc-service seatd status >/dev/null 2>&1; then
   sudo rc-service seatd start
 fi
 
+# 确保 udev-trigger 已运行（libinput 依赖 udev 属性识别输入设备）
+if ! rc-service udev-trigger status >/dev/null 2>&1; then
+  echo "启动 udev-trigger..."
+  sudo rc-service udev-trigger start
+fi
+
 # 环境变量
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
 mkdir -p "$XDG_RUNTIME_DIR"
@@ -17,6 +23,7 @@ chmod 0700 "$XDG_RUNTIME_DIR"
 # wlroots 渲染配置 (VM 内用软件渲染)
 export WLR_RENDERER=pixman
 export WLR_NO_HARDWARE_CURSORS=1
+export WLR_LIBINPUT_NO_DEVICES=1
 
 # QEMU 虚拟 GPU 的 DRM 设备
 if [ -e /dev/dri/card0 ]; then

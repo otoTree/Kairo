@@ -20,6 +20,10 @@ const Output = struct {
     height: i32,
 };
 
+const Seat = struct {
+    river_seat: *river.SeatV1,
+};
+
 const Context = struct {
     wm_global: ?*river.WindowManagerV1,
     compositor_global: ?*wl.Compositor,
@@ -28,8 +32,13 @@ const Context = struct {
 
     windows: std.ArrayList(*Window),
     outputs: std.ArrayList(*Output),
+    seats: std.ArrayList(*Seat),
     allocator: std.mem.Allocator,
     agent_active: bool = false,
+    /// 待聚焦的窗口（在下一次 manage_start 时应用）
+    pending_focus: ?*river.WindowV1 = null,
+    /// 当前已聚焦的窗口
+    focused_window: ?*river.WindowV1 = null,
 };
 
 fn windowListener(window: *river.WindowV1, event: river.WindowV1.Event, ctx: *Window) void {
@@ -64,6 +73,30 @@ fn outputListener(output: *river.OutputV1, event: river.OutputV1.Event, ctx: *Ou
     }
 }
 
+fn seatListener(seat: *river.SeatV1, event: river.SeatV1.Event, ctx: *Context) void {
+    _ = seat;
+    switch (event) {
+        .pointer_enter => |ev| {
+            // 鼠标进入窗口区域，设置待聚焦窗口
+            if (ev.window) |window| {
+                ctx.pending_focus = window;
+                std.debug.print("WM: pointer entered window, pending focus\n", .{});
+            }
+        },
+        .window_interaction => |ev| {
+            // 窗口被点击/交互，设置待聚焦窗口
+            if (ev.window) |window| {
+                ctx.pending_focus = window;
+                std.debug.print("WM: window interaction, pending focus\n", .{});
+            }
+        },
+        .pointer_leave => {
+            // 鼠标离开窗口，不清除焦点（保持 click-to-focus 语义）
+        },
+        else => {},
+    }
+}
+
 fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ctx: *Context) void {
     std.debug.print("WM: event received: {}\n", .{@intFromEnum(event)});
     switch (event) {
@@ -79,6 +112,10 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
                 ctx.allocator.destroy(win);
                 return;
             };
+            // 自动聚焦第一个窗口
+            if (ctx.focused_window == null) {
+                ctx.pending_focus = ev.id;
+            }
             std.debug.print("WM: new window (total: {})\n", .{ctx.windows.items.len});
         },
         .output => |ev| {
@@ -97,6 +134,15 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
             std.debug.print("WM: new output\n", .{});
         },
         .manage_start => {
+            // 应用待聚焦窗口
+            if (ctx.pending_focus) |focus_win| {
+                if (ctx.seats.items.len > 0) {
+                    ctx.seats.items[0].river_seat.focusWindow(focus_win);
+                    ctx.focused_window = focus_win;
+                    std.debug.print("WM: focused window\n", .{});
+                }
+                ctx.pending_focus = null;
+            }
             // Manage sequence: propose dimensions for all windows
             proposeDimensions(ctx);
             wm.manageFinish();
@@ -105,6 +151,17 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
             // Render sequence: set positions for all window nodes
             positionWindows(ctx);
             wm.renderFinish();
+        },
+        .seat => |ev| {
+            // 新 seat 创建，注册监听器
+            const seat_obj = ctx.allocator.create(Seat) catch return;
+            seat_obj.* = .{ .river_seat = ev.id };
+            ev.id.setListener(*Context, seatListener, ctx);
+            ctx.seats.append(ctx.allocator, seat_obj) catch {
+                ctx.allocator.destroy(seat_obj);
+                return;
+            };
+            std.debug.print("WM: new seat\n", .{});
         },
         else => {},
     }
@@ -223,10 +280,12 @@ pub fn main() !void {
 
         .windows = .empty,
         .outputs = .empty,
+        .seats = .empty,
         .allocator = allocator,
     };
     defer ctx.windows.deinit(allocator);
     defer ctx.outputs.deinit(allocator);
+    defer ctx.seats.deinit(allocator);
 
     const display = try wl.Display.connect(null);
     const registry = try display.getRegistry();

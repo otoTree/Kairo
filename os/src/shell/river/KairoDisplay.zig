@@ -88,7 +88,7 @@ const KairoSurface = struct {
     /// overlay 子树，用于管理所有渲染节点的生命周期
     overlay_tree: ?*wlr.SceneTree = null,
     /// 可交互元素的命中区域列表（用于 user_action 事件）
-    hit_regions: std.ArrayList(HitRegion) = std.ArrayList(HitRegion).init(std.heap.c_allocator),
+    hit_regions: std.ArrayList(HitRegion) = .{},
 
     const HitRegion = struct {
         element_id: []const u8,
@@ -104,7 +104,7 @@ const KairoSurface = struct {
         if (self.overlay_tree) |tree| {
             tree.node.destroy();
         }
-        self.hit_regions.deinit();
+        self.hit_regions.deinit(std.heap.c_allocator);
         std.heap.c_allocator.destroy(self);
     }
 
@@ -220,7 +220,7 @@ fn renderElementWithHitTest(parent: *wlr.SceneTree, element: *const UIElement, s
     if (element.id) |eid| {
         const w = element.width orelse 100;
         const h = element.height orelse 40;
-        surface.hit_regions.append(.{
+        surface.hit_regions.append(std.heap.c_allocator, .{
             .element_id = eid,
             .x = ex,
             .y = ey,

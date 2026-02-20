@@ -153,7 +153,7 @@ fn startServices() !void {
             if (svc.health_file) |hf| {
                 waitForFile(hf, 10);
             } else {
-                std.time.sleep(500 * std.time.ns_per_ms);
+                std.Thread.sleep(500 * std.time.ns_per_ms);
             }
         } else {
             std.debug.print("  Failed to fork for {s}\n", .{svc.name});
@@ -169,7 +169,7 @@ fn waitForFile(path_str: [*:0]const u8, timeout_secs: u32) void {
     while (waited < timeout_secs * 10) : (waited += 1) {
         // 尝试 stat 文件，成功则表示文件存在
         _ = posix.fstatat(posix.AT.FDCWD, std.mem.span(path_str), 0) catch {
-            std.time.sleep(100 * std.time.ns_per_ms);
+            std.Thread.sleep(100 * std.time.ns_per_ms);
             continue;
         };
         std.debug.print("  Health check passed: {s}\n", .{path_str});
@@ -186,14 +186,14 @@ fn waitForFile(path_str: [*:0]const u8, timeout_secs: u32) void {
 fn setupSignalHandlers() void {
     const chld_act = posix.Sigaction{
         .handler = .{ .handler = handleSigchld },
-        .mask = posix.empty_sigset,
+        .mask = posix.sigemptyset(),
         .flags = posix.SA.NOCLDSTOP | posix.SA.RESTART,
     };
     posix.sigaction(posix.SIG.CHLD, &chld_act, null);
 
     const term_act = posix.Sigaction{
         .handler = .{ .handler = handleSigterm },
-        .mask = posix.empty_sigset,
+        .mask = posix.sigemptyset(),
         .flags = 0,
     };
     posix.sigaction(posix.SIG.TERM, &term_act, null);
@@ -205,7 +205,8 @@ fn setupSignalHandlers() void {
 /// SIGCHLD 处理：回收所有已退出的子进程
 fn handleSigchld(_: c_int) callconv(.c) void {
     while (true) {
-        const result = std.os.linux.waitpid(-1, null, std.os.linux.W.NOHANG);
+        var status: u32 = 0;
+        const result = std.os.linux.waitpid(-1, &status, std.os.linux.W.NOHANG);
         if (result == 0 or result == -@as(isize, @intCast(@intFromEnum(std.os.linux.E.CHILD)))) {
             break;
         }
@@ -225,7 +226,8 @@ fn handleSigterm(_: c_int) callconv(.c) void {
 /// 主循环：等待信号，回收僵尸进程
 fn mainLoop() void {
     while (!should_shutdown) {
-        _ = std.os.linux.syscall0(.pause);
+        // ARM64 没有 pause 系统调用，使用 ppoll 替代
+        std.Thread.sleep(std.time.ns_per_s);
     }
     gracefulShutdown();
 }
@@ -248,12 +250,13 @@ fn gracefulShutdown() void {
     // 等待子进程退出（最多 5 秒）
     var waited: u32 = 0;
     while (waited < 50) : (waited += 1) {
-        const result = std.os.linux.waitpid(-1, null, std.os.linux.W.NOHANG);
+        var status: u32 = 0;
+        const result = std.os.linux.waitpid(-1, &status, std.os.linux.W.NOHANG);
         if (result == -@as(isize, @intCast(@intFromEnum(std.os.linux.E.CHILD)))) {
             std.debug.print("Kairo Init: all processes exited\n", .{});
             return;
         }
-        std.time.sleep(100 * std.time.ns_per_ms);
+        std.Thread.sleep(100 * std.time.ns_per_ms);
     }
 
     // 超时，强制终止
@@ -261,7 +264,8 @@ fn gracefulShutdown() void {
     _ = std.os.linux.kill(-1, posix.SIG.KILL);
 
     while (true) {
-        const result = std.os.linux.waitpid(-1, null, std.os.linux.W.NOHANG);
+        var status2: u32 = 0;
+        const result = std.os.linux.waitpid(-1, &status2, std.os.linux.W.NOHANG);
         if (result <= 0) break;
     }
 }

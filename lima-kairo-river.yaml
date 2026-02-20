@@ -13,6 +13,11 @@ vmType: "qemu"
 video:
   display: "vnc"
 
+# Alpine 没有 systemd，禁用 containerd
+containerd:
+  system: false
+  user: false
+
 cpus: 4
 memory: "4GiB"
 disk: "20GiB"
@@ -62,6 +67,10 @@ provision:
     rc-update add seatd default
     rc-service seatd start || true
 
+    # 启用 udev-trigger（libinput 依赖 udev 属性识别输入设备）
+    rc-update add udev-trigger default
+    rc-service udev-trigger start || true
+
     # 将默认用户加入 seat/video/input 组
     for g in seat video input; do
       addgroup "{{.User}}" "$g" 2>/dev/null || true
@@ -82,10 +91,8 @@ message: |
   Kairo River VM 已就绪!
 
   VNC: 查看 ~/.lima/kairo-river/vncdisplay
-  部署: limactl shell kairo-river -- ~/Desktop/Kairo/scripts/deploy-vm.sh
-  启动: limactl shell kairo-river -- ~/Desktop/Kairo/scripts/start-river.sh
+  部署: ./scripts/deploy-vm.sh
+  启动: limactl shell kairo-river -- start-river
 
 mountTypesUnsupported: [9p]
-mounts:
-- location: "~"
-  writable: true
+mounts: []

@@ -1,27 +1,10 @@
 #!/bin/sh
 # Kairo River Init Script
+# River 0.4.0: riverctl 已移除，焦点/键绑定由 kairo-wm 管理
 
-# --- Keybindings ---
 # 终端: foot (轻量级 Wayland 终端), 回退到 alacritty
 TERM_CMD="foot"
 command -v foot >/dev/null 2>&1 || TERM_CMD="alacritty"
-
-riverctl map normal Super Return spawn "$TERM_CMD"
-riverctl map normal Super Q close
-riverctl map normal Super E exit
-
-# 窗口焦点切换
-riverctl map normal Super J focus-view next
-riverctl map normal Super K focus-view previous
-
-# --- Appearance ---
-riverctl background-color 0x002b36
-riverctl border-color-focused 0x93a1a1
-riverctl border-color-unfocused 0x586e75
-riverctl border-width 2
-
-# --- Input ---
-riverctl set-repeat 50 300
 
 # --- Layout (Managed by Kairo WM) ---
 kairo-wm > /tmp/kairo-wm.log 2>&1 &
