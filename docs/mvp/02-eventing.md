@@ -24,7 +24,7 @@ MVP 内 Eventing 由三部分构成：
 
 参考背景：
 - [global-event-bus-spec.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/global-event-bus-spec.md)
-- [agentos-mvp-v0.1.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp-v0.1.md)
+- [agentos-mvp.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp.md)
 
 ## 4. 稳定对外契约
 

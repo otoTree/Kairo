@@ -29,8 +29,7 @@
 - BinaryRunner（注入 IPC socket）：[binary-runner.ts](file:///Users/hjr/Desktop/Kairo/src/domains/skills/binary-runner.ts)
 
 参考背景：
-- [skill-integration-spec.md](file:///Users/hjr/Desktop/Kairo/docs/skill-integration-spec.md)
-- [agentos-mvp-v0.1.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp-v0.1.md)
+- [agentos-mvp.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp.md)
 
 ## 4. 技能打包与发现（稳定约定）
 

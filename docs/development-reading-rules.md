@@ -9,11 +9,14 @@
 
 ## 二、阅读顺序
 
-1. 顶层产品与愿景：agent_os_vision.md、prd_agent_os.md、prd_agent_os_zh.md
-2. 体系结构与总览：architecture/ 目录内的系统架构与运行时相关文档
-3. MVP 体系：mvp/README.md 然后按 01～07 顺序阅读
-4. 版本规划：version/ 按 v0.1 到 v1.0 顺序阅读
-5. 专题规范与补充：local-database-spec.md、skill-integration-spec.md、stateful-agent-hz.md、linux/plan.md
+1. 核心架构：architecture/system-architecture-diagram.md（静态分层）、architecture/system-runtime-diagram.md（运行时数据流）
+2. 产品与演进：evolution/prd.md、evolution/spec.md
+3. 体系结构与规范：architecture/ 目录内其余规范文档（agentos-mvp.md、kernel-ipc-spec.md 等）
+4. MVP 体系：mvp/README.md 然后按 01～07 顺序阅读
+5. 版本规划：version/ 按 v0.1 到 v1.0 顺序阅读
+6. 专题规范与补充：local-database-spec.md、linux/plan.md
+
+> 注：已归档的历史文档见 archive/ 目录，仅供追溯参考。
 
 ## 三、阅读方法
 

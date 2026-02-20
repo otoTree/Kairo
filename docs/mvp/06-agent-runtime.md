@@ -27,7 +27,7 @@
 - Memory/SharedMemory：[memory.ts](file:///Users/hjr/Desktop/Kairo/src/domains/agent/memory.ts) / [shared-memory.ts](file:///Users/hjr/Desktop/Kairo/src/domains/agent/shared-memory.ts)
 
 参考背景：
-- [agentos-mvp-v0.1.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp-v0.1.md#L209-L259)
+- [agentos-mvp.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp.md)
 
 ## 4. 输入事件契约（Agent 必须消费）
 

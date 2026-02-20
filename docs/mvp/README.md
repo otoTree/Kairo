@@ -19,7 +19,7 @@ v0.1 的核心目标：把 Kairo 从“可运行 Agent 的应用”推进到“�
 - artifacts 分发/校验/升级/回滚
 
 对应背景文档：
-- [agentos-mvp-v0.1.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp-v0.1.md)
+- [agentos-mvp.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp.md)
 - [agentos-core-gaps.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-core-gaps.md)
 - [kernel-ipc-spec.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/kernel-ipc-spec.md)
 - [global-event-bus-spec.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/global-event-bus-spec.md)

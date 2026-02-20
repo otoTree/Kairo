@@ -32,7 +32,7 @@ Kernel 对上层（Agent/Skills/UI）暴露稳定系统原语，避免上层绑�
 
 参考背景：
 - [kernel-ipc-spec.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/kernel-ipc-spec.md)
-- [agentos-mvp-v0.1.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp-v0.1.md)
+- [agentos-mvp.md](file:///Users/hjr/Desktop/Kairo/docs/architecture/agentos-mvp.md)
 
 ## 4. 数据模型（稳定）
 
