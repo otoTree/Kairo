@@ -332,25 +332,57 @@ pub fn main() !void {
     if (display.flush() != .SUCCESS) return error.RoundtripFailed;
     std.debug.print("After second roundtrip: windows={}, outputs={}\n", .{ ctx.windows.items.len, ctx.outputs.items.len });
 
-    // Phase 4: KDP - 发送 "Hello Kairo" UI 树
+    // KDP: 发送品牌窗口 UI 树
     if (ctx.kairo_display != null and ctx.compositor_global != null) {
         if (ctx.compositor_global.?.createSurface()) |surface| {
             if (ctx.kairo_display.?.getKairoSurface(surface)) |k_surface| {
-                std.debug.print("Created kairo_surface\n", .{});
+                std.debug.print("Created kairo_surface for brand window\n", .{});
 
-                // 构建包含背景矩形和文本的 UI 树
+                // 品牌窗口初始 UI 树（静态版本，后续由 TypeScript 层通过 IPC 推送动态更新）
                 const json =
                     \\{"type":"root","children":[
-                    \\  {"type":"rect","x":50,"y":50,"width":280,"height":60,
-                    \\   "color":[0.15,0.15,0.25,0.92]},
-                    \\  {"type":"rect","x":50,"y":50,"width":280,"height":3,
-                    \\   "color":[0.4,0.6,1.0,1.0]},
-                    \\  {"type":"text","x":62,"y":62,"text":"Hello Kairo",
-                    \\   "color":[0.9,0.95,1.0,1.0],"scale":3}
+                    \\  {"type":"rect","id":"bg","x":0,"y":0,"width":480,"height":560,
+                    \\   "color":[0.051,0.051,0.071,1.0]},
+                    \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":480,"height":36,
+                    \\   "color":[0.0,0.0,0.0,0.0]},
+                    \\  {"type":"rect","id":"btn_close","x":452,"y":10,"width":16,"height":16,
+                    \\   "color":[0.557,0.557,0.604,0.3],"action":"close"},
+                    \\  {"type":"text","id":"logo","x":220,"y":180,"text":"<>",
+                    \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
+                    \\  {"type":"text","id":"brand_name","x":184,"y":228,"text":"K A I R O",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":4},
+                    \\  {"type":"text","id":"subtitle","x":176,"y":268,"text":"Agent-Native OS",
+                    \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
+                    \\  {"type":"rect","id":"divider","x":180,"y":300,"width":120,"height":1,
+                    \\   "color":[0.165,0.165,0.235,0.5]},
+                    \\  {"type":"rect","id":"card_terminal","x":88,"y":324,"width":140,"height":72,
+                    \\   "color":[0.118,0.118,0.165,0.92],"action":"launch_terminal"},
+                    \\  {"type":"text","id":"card_terminal_icon","x":100,"y":340,"text":">_",
+                    \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
+                    \\  {"type":"text","id":"card_terminal_label","x":100,"y":368,"text":"Terminal",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                    \\  {"type":"rect","id":"card_files","x":252,"y":324,"width":140,"height":72,
+                    \\   "color":[0.118,0.118,0.165,0.92],"action":"launch_files"},
+                    \\  {"type":"text","id":"card_files_icon","x":264,"y":340,"text":"[]",
+                    \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
+                    \\  {"type":"text","id":"card_files_label","x":264,"y":368,"text":"Files",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                    \\  {"type":"rect","id":"status_panel","x":100,"y":420,"width":280,"height":96,
+                    \\   "color":[0.118,0.118,0.165,0.92]},
+                    \\  {"type":"text","id":"status_title","x":112,"y":432,"text":"System Status",
+                    \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
+                    \\  {"type":"text","id":"status_agent","x":112,"y":452,"text":"Agent: Ready",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                    \\  {"type":"text","id":"status_memory","x":112,"y":474,"text":"Memory: -- / --",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                    \\  {"type":"text","id":"status_uptime","x":112,"y":496,"text":"Uptime: 00:00:00",
+                    \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                    \\  {"type":"text","id":"version","x":196,"y":536,"text":"v0.1.0-alpha",
+                    \\   "color":[0.353,0.353,0.431,0.6],"scale":1}
                     \\]}
                 ;
                 k_surface.commitUiTree(json);
-                std.debug.print("Sent Hello Kairo UI Tree\n", .{});
+                std.debug.print("Sent Brand Window UI Tree\n", .{});
             } else |err| {
                 std.debug.print("Failed to create kairo_surface: {}\n", .{err});
             }
@@ -358,7 +390,7 @@ pub fn main() !void {
             std.debug.print("Failed to create wl_surface: {}\n", .{err});
         }
     } else {
-        std.debug.print("Skipping KDP test (kairo_display or compositor not found)\n", .{});
+        std.debug.print("Skipping KDP (kairo_display or compositor not found)\n", .{});
     }
 
     const wl_fd = display.getFd();

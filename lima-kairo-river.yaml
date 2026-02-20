@@ -55,7 +55,9 @@ provision:
       mesa-dri-gallium \
       eudev \
       seatd \
-      xwayland
+      xwayland \
+      freetype \
+      font-dejavu
 
     # 终端模拟器
     apk add --no-cache foot

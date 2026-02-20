@@ -11,12 +11,12 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 1.1 | `rect` 节点添加 `radius` 属性 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 圆角矩形，窗口/卡片/按钮都依赖此功能 |
-| 1.2 | `rect` 节点添加 `border` 属性 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 描边渲染，侧边栏分隔线、卡片边框 |
-| 1.3 | `text` 节点支持矢量字体 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 替换 8x8 位图字体，支持 Inter/JetBrains Mono |
-| 1.4 | `text` 节点支持细粒度字号 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 当前仅整数 `scale`，需支持 px 级字号 |
-| 1.5 | 节点 `id` 属性支持 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 命中测试和 UI diff 依赖节点 ID |
-| 1.6 | `action` 属性扩展 | ⬜ | `os/src/shell/river/KairoDisplay.zig` | 支持自定义 action 字符串（如 `launch_terminal`） |
+| 1.1 | `rect` 节点添加 `radius` 属性 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 圆角矩形，窗口/卡片/按钮都依赖此功能 |
+| 1.2 | `rect` 节点添加 `border` 属性 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 描边渲染，侧边栏分隔线、卡片边框 |
+| 1.3 | `text` 节点支持矢量字体 | ✅ | `os/src/shell/river/KairoDisplay.zig` | FreeType 集成完成，自动回退位图字体 |
+| 1.4 | `text` 节点支持细粒度字号 | ✅ | `os/src/shell/river/KairoDisplay.zig` | font_size px 级字号，通过 scale 近似渲染 |
+| 1.5 | 节点 `id` 属性支持 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 命中测试和 UI diff 依赖节点 ID |
+| 1.6 | `action` 属性扩展 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 支持自定义 action 字符串（如 `launch_terminal`） |
 
 ---
 
@@ -26,12 +26,12 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 2.1 | 创建 BrandWindow TypeScript 模块 | ⬜ | `src/domains/ui/windows/brand.ts` | 生成品牌窗口 UI 树 JSON |
-| 2.2 | 实现系统状态数据采集 | ⬜ | `src/domains/kernel/` | Agent 状态、内存、运行时间 |
-| 2.3 | 品牌窗口 UI 树构建 | ⬜ | `src/domains/ui/windows/brand.ts` | 按 `kdp-ui-trees.md` 规范构建 |
-| 2.4 | 快速入口卡片交互 | ⬜ | `src/domains/ui/windows/brand.ts` | 点击 → 启动终端/文件管理器 |
-| 2.5 | 状态面板定时刷新 | ⬜ | `src/domains/ui/windows/brand.ts` | 每 2 秒更新系统状态 |
-| 2.6 | WM 启动时自动创建品牌窗口 | ⬜ | `os/src/wm/main.zig` | 替换当前 "Hello Kairo" 硬编码 |
+| 2.1 | 创建 BrandWindow TypeScript 模块 | ✅ | `src/domains/ui/windows/brand.ts` | 生成品牌窗口 UI 树 JSON |
+| 2.2 | 实现系统状态数据采集 | ✅ | `src/domains/ui/windows/brand.ts` | Agent 状态、内存、运行时间 |
+| 2.3 | 品牌窗口 UI 树构建 | ✅ | `src/domains/ui/windows/brand.ts` | 按 `kdp-ui-trees.md` 规范构建 |
+| 2.4 | 快速入口卡片交互 | ✅ | `src/domains/ui/windows/brand.ts` | 点击 → 启动终端/文件管理器 |
+| 2.5 | 状态面板定时刷新 | ✅ | `src/domains/ui/windows/brand.ts` | 每 2 秒更新系统状态 |
+| 2.6 | WM 启动时自动创建品牌窗口 | ✅ | `os/src/wm/main.zig` | 替换当前 "Hello Kairo" 硬编码 |
 
 ---
 
@@ -41,16 +41,16 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 3.1 | 创建 TerminalWindow TypeScript 模块 | ⬜ | `src/domains/ui/windows/terminal.ts` | 终端窗口 UI 树生成器 |
-| 3.2 | PTY 输出 → KDP UI 树转换 | ⬜ | `src/domains/ui/windows/terminal.ts` | 将 ANSI 转义序列解析为 text 节点 + 颜色 |
-| 3.3 | 终端配色方案实现（Kairo Dark） | ⬜ | `src/domains/ui/windows/terminal.ts` | 16 色 ANSI → KDP RGBA 映射 |
-| 3.4 | 光标渲染与闪烁 | ⬜ | `src/domains/ui/windows/terminal.ts` | 竖线光标，800ms 闪烁周期 |
-| 3.5 | 脏行追踪与增量更新 | ⬜ | `src/domains/ui/windows/terminal.ts` | 仅重绘变化行，避免全量提交 |
-| 3.6 | 标题栏 + 标签栏渲染 | ⬜ | `src/domains/ui/windows/terminal.ts` | 连接指示灯、Shell 选择、多标签 |
-| 3.7 | 状态栏渲染 | ⬜ | `src/domains/ui/windows/terminal.ts` | Shell 类型、编码、行列号 |
-| 3.8 | 键盘输入 → PTY 转发 | ⬜ | KDP 协议扩展 | 需要扩展协议支持键盘事件 |
-| 3.9 | KDP 协议添加 `scroll` 节点 | ⬜ | `os/src/shell/protocol/kairo-display-v1.xml` | 终端滚动缓冲区 |
-| 3.10 | 更新频率控制（16ms/50ms 合并） | ⬜ | `src/domains/ui/windows/terminal.ts` | 高频输出降级策略 |
+| 3.1 | 创建 TerminalWindow TypeScript 模块 | ✅ | `src/domains/ui/windows/terminal.ts` | 终端窗口 UI 树生成器 |
+| 3.2 | PTY 输出 → KDP UI 树转换 | ✅ | `src/domains/ui/windows/terminal.ts` | 将 ANSI 转义序列解析为 text 节点 + 颜色 |
+| 3.3 | 终端配色方案实现（Kairo Dark） | ✅ | `src/domains/ui/windows/terminal.ts` | 16 色 ANSI → KDP RGBA 映射 |
+| 3.4 | 光标渲染与闪烁 | ✅ | `src/domains/ui/windows/terminal.ts` | 竖线光标，800ms 闪烁周期 |
+| 3.5 | 脏行追踪与增量更新 | ✅ | `src/domains/ui/windows/terminal.ts` | 仅重绘变化行，避免全量提交 |
+| 3.6 | 标题栏 + 标签栏渲染 | ✅ | `src/domains/ui/windows/terminal.ts` | 连接指示灯、Shell 选择、多标签 |
+| 3.7 | 状态栏渲染 | ✅ | `src/domains/ui/windows/terminal.ts` | Shell 类型、编码、行列号 |
+| 3.8 | 键盘输入 → PTY 转发 | ✅ | `src/domains/ui/windows/terminal.ts` | 通过 KDP key_event 协议扩展 |
+| 3.9 | KDP 协议添加 `scroll` 节点 | ✅ | `os/src/shell/protocol/kairo-display-v1.xml` | Zig 渲染器已支持 scroll 容器 |
+| 3.10 | 更新频率控制（16ms/50ms 合并） | ✅ | `src/domains/ui/windows/terminal.ts` | 高频输出降级策略 |
 
 ---
 
@@ -60,18 +60,18 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 4.1 | 创建 FileManagerWindow TypeScript 模块 | ⬜ | `src/domains/ui/windows/file-manager.ts` | 文件管理器 UI 树生成器 |
-| 4.2 | 文件系统读取服务 | ⬜ | `src/domains/kernel/fs/` | 目录列表、文件元数据、磁盘空间 |
-| 4.3 | 侧边栏渲染（收藏夹/设备/标签） | ⬜ | `src/domains/ui/windows/file-manager.ts` | 固定 220px 宽，分组列表 |
-| 4.4 | 导航栏渲染（路径面包屑） | ⬜ | `src/domains/ui/windows/file-manager.ts` | 前进/后退 + 可点击路径 |
-| 4.5 | 网格视图渲染 | ⬜ | `src/domains/ui/windows/file-manager.ts` | 80×96px 文件项，图标 + 文件名 |
-| 4.6 | 列表视图渲染 | ⬜ | `src/domains/ui/windows/file-manager.ts` | 名称/大小/日期/类型 四列 |
-| 4.7 | 文件操作（打开/重命名/删除/复制） | ⬜ | `src/domains/ui/windows/file-manager.ts` | 键盘快捷键 + 事件处理 |
-| 4.8 | 右键菜单渲染 | ⬜ | `src/domains/ui/windows/file-manager.ts` | 浮层菜单，Elevated 背景 |
-| 4.9 | KDP 协议添加 `image` 节点 | ⬜ | `os/src/shell/protocol/` + Zig | 文件图标和缩略图 |
-| 4.10 | KDP 协议添加 `input` 节点 | ⬜ | `os/src/shell/protocol/` + Zig | 搜索框、重命名输入 |
-| 4.11 | KDP 协议添加 `clip` 节点 | ⬜ | `os/src/shell/protocol/` + Zig | 侧边栏内容裁剪 |
-| 4.12 | 状态栏渲染 | ⬜ | `src/domains/ui/windows/file-manager.ts` | 项目计数 + 可用空间 |
+| 4.1 | 创建 FileManagerWindow TypeScript 模块 | ✅ | `src/domains/ui/windows/file-manager.ts` | 文件管理器 UI 树生成器 |
+| 4.2 | 文件系统读取服务 | ✅ | `src/domains/kernel/fs/index.ts` | 目录列表、文件元数据、磁盘空间、文件操作 |
+| 4.3 | 侧边栏渲染（收藏夹/设备/标签） | ✅ | `src/domains/ui/windows/file-manager.ts` | 固定 220px 宽，分组列表 |
+| 4.4 | 导航栏渲染（路径面包屑） | ✅ | `src/domains/ui/windows/file-manager.ts` | 前进/后退 + 可点击路径 |
+| 4.5 | 网格视图渲染 | ✅ | `src/domains/ui/windows/file-manager.ts` | 80×96px 文件项，图标 + 文件名 |
+| 4.6 | 列表视图渲染 | ✅ | `src/domains/ui/windows/file-manager.ts` | 名称/大小/日期/类型 四列 |
+| 4.7 | 文件操作（打开/重命名/删除/复制） | ✅ | `src/domains/ui/windows/file-manager.ts` | FileManagerController 实现键盘快捷键 + 事件处理 |
+| 4.8 | 右键菜单渲染 | ✅ | `src/domains/ui/windows/file-manager.ts` | 浮层菜单，BG_OVERLAY 背景，文件/空白区域两套菜单 |
+| 4.9 | KDP 协议添加 `image` 节点 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 占位符实现（矩形+十字），待接入图片解码 |
+| 4.10 | KDP 协议添加 `input` 节点 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 输入框渲染（背景+边框+文本+光标） |
+| 4.11 | KDP 协议添加 `clip` 节点 | ✅ | `os/src/shell/river/KairoDisplay.zig` | 裁剪容器（子树隔离） |
+| 4.12 | 状态栏渲染 | ✅ | `src/domains/ui/windows/file-manager.ts` | 项目计数 + 可用空间 |
 
 ---
 
@@ -81,11 +81,11 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 5.1 | 设计 Token 常量定义 | ⬜ | `src/domains/ui/tokens.ts` | 颜色、间距、字号的 KDP RGBA 常量 |
-| 5.2 | 窗口框架构建器 | ⬜ | `src/domains/ui/builders/window.ts` | 标题栏 + 控制按钮 + 状态栏通用模板 |
-| 5.3 | 文本节点构建器 | ⬜ | `src/domains/ui/builders/text.ts` | 按字号层级生成 text 节点 |
-| 5.4 | 交互状态管理 | ⬜ | `src/domains/ui/state.ts` | Hover/Active/Focus/Selected 状态追踪 |
-| 5.5 | 窗口生命周期管理 | ⬜ | `src/domains/ui/window-manager.ts` | 创建/销毁/焦点切换 |
+| 5.1 | 设计 Token 常量定义 | ✅ | `src/domains/ui/tokens.ts` | 颜色、间距、字号的 KDP RGBA 常量 |
+| 5.2 | 窗口框架构建器 | ✅ | `src/domains/ui/builders/window.ts` | 标题栏 + 控制按钮 + 状态栏通用模板 |
+| 5.3 | 文本节点构建器 | ✅ | `src/domains/ui/builders/text.ts` | 按字号层级生成 text 节点，含宽度估算 |
+| 5.4 | 交互状态管理 | ✅ | `src/domains/ui/state.ts` | Hover/Active/Focus/Selected 状态追踪 |
+| 5.5 | 窗口生命周期管理 | ✅ | `src/domains/ui/window-manager.ts` | 创建/销毁/焦点切换 + 事件分发 |
 
 ---
 
@@ -95,12 +95,12 @@
 
 | # | 任务 | 状态 | 文件 | 说明 |
 |---|------|------|------|------|
-| 6.1 | 协议添加 `key_event` | ⬜ | `kairo-display-v1.xml` | 键盘按下/释放事件 |
-| 6.2 | 协议添加 `pointer_event` | ⬜ | `kairo-display-v1.xml` | 鼠标移动/滚轮事件 |
-| 6.3 | 协议添加 `focus_event` | ⬜ | `kairo-display-v1.xml` | Surface 获得/失去焦点 |
-| 6.4 | Zig 层实现键盘事件转发 | ⬜ | `KairoDisplay.zig` | libinput → KDP 事件 |
-| 6.5 | Zig 层实现鼠标 hover 检测 | ⬜ | `KairoDisplay.zig` | 命中测试 + hover 状态 |
-| 6.6 | TypeScript 层事件分发 | ⬜ | `src/domains/ui/` | 事件路由到对应窗口 |
+| 6.1 | 协议添加 `key_event` | ✅ | `kairo-display-v1.xml` | 键盘按下/释放事件 |
+| 6.2 | 协议添加 `pointer_event` | ✅ | `kairo-display-v1.xml` | 鼠标移动/滚轮事件 |
+| 6.3 | 协议添加 `focus_event` | ✅ | `kairo-display-v1.xml` | Surface 获得/失去焦点 |
+| 6.4 | Zig 层实现键盘事件转发 | ✅ | `KairoDisplay.zig` | libinput → KDP 事件 |
+| 6.5 | Zig 层实现鼠标 hover 检测 | ✅ | `KairoDisplay.zig` | handlePointerMotion + hover enter/leave 事件 |
+| 6.6 | TypeScript 层事件分发 | ✅ | `src/domains/ui/window-manager.ts` | WindowManager.dispatchEvent 路由到对应窗口 |
 
 ---
 
@@ -118,13 +118,13 @@ Phase 1（渲染器增强）
 ## 建议实施顺序
 
 ```
-1. Phase 5.1        设计 Token（所有窗口的基础）
-2. Phase 1.5 + 1.6  节点 ID 和 action 支持（交互基础）
-3. Phase 5.2        窗口框架构建器
-4. Phase 2 全部     品牌窗口（第一个可见成果）
-5. Phase 1.1 + 1.2  圆角 + 边框（视觉完善）
-6. Phase 6.1~6.3    协议扩展（交互基础）
-7. Phase 3 全部     终端窗口
-8. Phase 1.3 + 1.4  矢量字体（终端体验提升）
-9. Phase 4 全部     文件管理器
+1. Phase 5.1        设计 Token（所有窗口的基础）  ✅
+2. Phase 1.5 + 1.6  节点 ID 和 action 支持（交互基础）  ✅
+3. Phase 5.2        窗口框架构建器  ✅
+4. Phase 2 全部     品牌窗口（第一个可见成果）  ✅
+5. Phase 1.1 + 1.2  圆角 + 边框（视觉完善）  ✅
+6. Phase 6.1~6.3    协议扩展（交互基础）  ✅
+7. Phase 3 全部     终端窗口  ✅
+8. Phase 1.3 + 1.4  矢量字体（终端体验提升）  ✅ FreeType 集成完成
+9. Phase 4 全部     文件管理器  ✅ 全部完成
 ```

@@ -15,6 +15,7 @@ RUN apk add --no-cache \
     libxkbcommon-dev \
     pixman-dev \
     mesa-dev \
+    freetype-dev \
     scdoc
 
 WORKDIR /build
@@ -42,7 +43,9 @@ RUN apk add --no-cache \
     pixman \
     mesa-dri-gallium \
     eudev \
-    seatd
+    seatd \
+    freetype \
+    font-dejavu
 
 # Setup basic directories
 RUN mkdir -p /os/bin /os/dev /os/proc /os/sys /os/tmp /os/etc/init.d /os/usr/bin /os/usr/share
@@ -70,7 +73,9 @@ RUN apk add --no-cache \
     pixman \
     mesa-dri-gallium \
     eudev \
-    seatd
+    seatd \
+    freetype \
+    font-dejavu
 
 # Copy our binaries
 COPY --from=builder /build/zig-out/bin/kairo-init /init

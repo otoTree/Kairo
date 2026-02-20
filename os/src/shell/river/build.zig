@@ -173,6 +173,7 @@ pub fn build(b: *Build) !void {
         river.linkSystemLibrary("wlroots-0.19");
         river.linkSystemLibrary("xkbcommon");
         river.linkSystemLibrary("pixman-1");
+        river.linkSystemLibrary("freetype2");
 
         river.root_module.addImport("wayland", wayland);
         river.root_module.addImport("xkbcommon", xkbcommon);

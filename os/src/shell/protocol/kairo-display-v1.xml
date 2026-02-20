@@ -31,6 +31,15 @@
       <description summary="update the UI tree">
         Send a new UI tree to be rendered on this surface.
         The tree is a JSON string.
+
+        Supported node types:
+        - root: 根节点容器
+        - rect: 矩形（支持 radius 圆角、border 边框）
+        - text: 文本（8x8 位图字体，支持 scale/font_size）
+        - scroll: 滚动容器（scroll_height 内容高度，scroll_offset 偏移）
+        - image: 图片节点（src 路径或 base64）
+        - input: 输入框（value 当前值，placeholder 占位符）
+        - clip: 裁剪容器（超出 width/height 的子节点被裁剪）
       </description>
       <arg name="json_payload" type="string" summary="Serialized UI Tree JSON"/>
     </request>
@@ -48,6 +57,31 @@
       <arg name="element_id" type="string"/>
       <arg name="action_type" type="string" summary="click, submit, hover"/>
       <arg name="payload" type="string" summary="JSON data (e.g. input value)"/>
+    </event>
+
+    <event name="key_event">
+      <description summary="keyboard input event">
+        Emitted when a key is pressed or released while this surface has focus.
+      </description>
+      <arg name="key" type="uint" summary="Linux keycode"/>
+      <arg name="state" type="uint" summary="0=released, 1=pressed"/>
+      <arg name="modifiers" type="uint" summary="bitmask: 1=shift, 2=ctrl, 4=alt, 8=super"/>
+    </event>
+
+    <event name="pointer_event">
+      <description summary="pointer motion and scroll event">
+        Emitted when the pointer moves or scrolls over this surface.
+      </description>
+      <arg name="x" type="int" summary="pointer x relative to surface"/>
+      <arg name="y" type="int" summary="pointer y relative to surface"/>
+      <arg name="event_type" type="uint" summary="0=motion, 1=scroll_up, 2=scroll_down"/>
+    </event>
+
+    <event name="focus_event">
+      <description summary="surface focus change">
+        Emitted when this surface gains or loses keyboard focus.
+      </description>
+      <arg name="focused" type="uint" summary="1=gained focus, 0=lost focus"/>
     </event>
   </interface>
 </protocol>
