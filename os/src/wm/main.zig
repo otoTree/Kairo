@@ -40,6 +40,8 @@ const KdpWindow = struct {
     maximized: bool = false,
     /// 是否已最小化（隐藏）
     minimized: bool = false,
+    /// 上下文引用（用于事件回调）
+    ctx: ?*Context = null,
 };
 
 const Output = struct {
@@ -105,6 +107,46 @@ fn windowListener(window: *river.WindowV1, event: river.WindowV1.Event, ctx: *Wi
             std.debug.print("WM: window decoration_hint = {}\n", .{ev.hint});
         },
         .closed => {},
+        else => {},
+    }
+}
+
+/// KDP surface 事件监听器：处理桌面图标点击等 user_action 事件
+fn kairoSurfaceListener(surface: *kairo.SurfaceV1, event: kairo.SurfaceV1.Event, kdp_win: *KdpWindow) void {
+    _ = surface;
+    switch (event) {
+        .user_action => |ev| {
+            const element_id = std.mem.span(ev.element_id);
+            const action_type = std.mem.span(ev.action_type);
+            std.debug.print("KDP user_action: element={s} action={s}\n", .{ element_id, action_type });
+
+            // 处理桌面图标点击 → 通过 IPC 发送 desktop.launch_app 命令
+            if (std.mem.startsWith(u8, element_id, "desktop-icon-") and std.mem.eql(u8, action_type, "click")) {
+                const app_id = element_id["desktop-icon-".len..];
+                std.debug.print("Desktop icon clicked: {s}\n", .{app_id});
+
+                // 直接在 WM 中创建对应窗口
+                if (kdp_win.ctx) |ctx| {
+                    // 构造 IPC 命令载荷
+                    var buf: [256]u8 = undefined;
+                    const payload = std.fmt.bufPrint(&buf, "desktop.launch_app:{s}", .{app_id}) catch return;
+                    const packet = ipc.Client.Packet{
+                        .type = .EVENT,
+                        .payload = payload,
+                    };
+                    handleIpcCommand(ctx, packet);
+                }
+            }
+
+            // 处理窗口关闭按钮
+            if (std.mem.eql(u8, element_id, "btn_close") or std.mem.eql(u8, element_id, "btn-close")) {
+                std.debug.print("Close button clicked on KDP window\n", .{});
+                // TODO: 关闭窗口
+            }
+        },
+        .key_event => {},
+        .pointer_event => {},
+        .focus_event => {},
         else => {},
     }
 }
@@ -669,6 +711,144 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
         startDragMove(ctx);
         return;
     }
+
+    // 桌面图标点击：创建对应应用窗口
+    if (std.mem.indexOf(u8, payload, "desktop.launch_app") != null) {
+        // 解析 appId
+        if (std.mem.indexOf(u8, payload, "chrome") != null) {
+            const chrome_json =
+                \\{"type":"root","children":[
+                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":900,"height":36,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Chrome - Google",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"rect","id":"btn_close","x":872,"y":10,"width":16,"height":16,
+                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
+                \\  {"type":"rect","id":"toolbar-bg","x":0,"y":36,"width":900,"height":36,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"btn-back","x":12,"y":46,"text":"<",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
+                \\  {"type":"text","id":"btn-forward","x":32,"y":46,"text":">",
+                \\   "color":[0.353,0.353,0.431,0.6],"scale":2},
+                \\  {"type":"input","id":"address-bar","x":76,"y":42,"width":812,"height":24,
+                \\   "value":"https://www.google.com","placeholder":"Enter URL..."},
+                \\  {"type":"rect","id":"content-bg","x":0,"y":72,"width":900,"height":528,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"text","id":"google-logo","x":370,"y":200,"text":"Google",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":4},
+                \\  {"type":"rect","id":"search-box","x":210,"y":260,"width":480,"height":36,
+                \\   "color":[0.118,0.118,0.165,0.92],"radius":16,"border_width":1,
+                \\   "border_color":[0.165,0.165,0.235,0.5]},
+                \\  {"type":"input","id":"search-input","x":230,"y":266,"width":440,"height":24,
+                \\   "placeholder":"Google Search"}
+                \\]}
+            ;
+            createKdpWindow(ctx, "Chrome", chrome_json);
+        } else if (std.mem.indexOf(u8, payload, "agent") != null) {
+            const agent_json =
+                \\{"type":"root","children":[
+                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":600,"height":500,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":600,"height":36,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Kairo Agent",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"rect","id":"btn_close","x":572,"y":10,"width":16,"height":16,
+                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
+                \\  {"type":"rect","id":"msg-area","x":0,"y":36,"width":600,"height":388,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"rect","id":"msg-bubble-0","x":16,"y":48,"width":300,"height":32,
+                \\   "color":[0.118,0.118,0.165,0.92],"radius":8},
+                \\  {"type":"text","id":"msg-text-0","x":28,"y":56,"text":"Hello! I'm Kairo Agent.",
+                \\   "color":[0.239,0.839,0.784,1.0],"scale":2},
+                \\  {"type":"rect","id":"msg-bubble-1","x":16,"y":88,"width":320,"height":32,
+                \\   "color":[0.118,0.118,0.165,0.92],"radius":8},
+                \\  {"type":"text","id":"msg-text-1","x":28,"y":96,"text":"How can I help you today?",
+                \\   "color":[0.239,0.839,0.784,1.0],"scale":2},
+                \\  {"type":"rect","id":"input-divider","x":0,"y":424,"width":600,"height":1,
+                \\   "color":[0.165,0.165,0.235,0.5]},
+                \\  {"type":"rect","id":"input-area","x":0,"y":425,"width":600,"height":47,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"rect","id":"agent-dot","x":12,"y":442,"width":8,"height":8,
+                \\   "color":[0.204,0.78,0.349,1.0],"radius":4},
+                \\  {"type":"input","id":"chat-input","x":28,"y":433,"width":500,"height":28,
+                \\   "placeholder":"Type a message..."},
+                \\  {"type":"rect","id":"btn-send","x":536,"y":433,"width":52,"height":28,
+                \\   "color":[0.29,0.486,1.0,1.0],"radius":4,"action":"send"},
+                \\  {"type":"text","id":"btn-send-text","x":548,"y":439,"text":"Send",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
+                \\  {"type":"rect","id":"statusbar","x":0,"y":472,"width":600,"height":28,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"status_left","x":12,"y":478,"text":"Agent Ready",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
+                \\  {"type":"text","id":"status_right","x":504,"y":478,"text":"Kairo v0.1.0",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
+                \\]}
+            ;
+            createKdpWindow(ctx, "Agent", agent_json);
+        } else if (std.mem.indexOf(u8, payload, "terminal") != null) {
+            const term_json =
+                \\{"type":"root","children":[
+                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":800,"height":500,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":800,"height":36,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Terminal",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"rect","id":"btn_close","x":772,"y":10,"width":16,"height":16,
+                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
+                \\  {"type":"rect","id":"content","x":0,"y":36,"width":800,"height":436,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"text","id":"prompt","x":12,"y":48,"text":"kairo@localhost:~$",
+                \\   "color":[0.204,0.78,0.349,1.0],"scale":2},
+                \\  {"type":"rect","id":"cursor","x":300,"y":48,"width":16,"height":16,
+                \\   "color":[0.91,0.91,0.93,0.8]},
+                \\  {"type":"rect","id":"statusbar","x":0,"y":472,"width":800,"height":28,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"status_left","x":12,"y":478,"text":"bash",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
+                \\  {"type":"text","id":"status_right","x":740,"y":478,"text":"UTF-8",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
+                \\]}
+            ;
+            createKdpWindow(ctx, "Terminal", term_json);
+        } else if (std.mem.indexOf(u8, payload, "files") != null) {
+            const files_json =
+                \\{"type":"root","children":[
+                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":900,"height":36,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Files - /home",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"rect","id":"btn_close","x":872,"y":10,"width":16,"height":16,
+                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
+                \\  {"type":"rect","id":"sidebar","x":0,"y":36,"width":220,"height":536,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"fav-title","x":12,"y":48,"text":"Favorites",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
+                \\  {"type":"text","id":"fav-home","x":12,"y":64,"text":"Home",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"text","id":"fav-docs","x":12,"y":88,"text":"Documents",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"text","id":"fav-dl","x":12,"y":112,"text":"Downloads",
+                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
+                \\  {"type":"rect","id":"content","x":220,"y":36,"width":680,"height":536,
+                \\   "color":[0.051,0.051,0.071,1.0]},
+                \\  {"type":"text","id":"path","x":232,"y":48,"text":"/home",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
+                \\  {"type":"rect","id":"statusbar","x":0,"y":572,"width":900,"height":28,
+                \\   "color":[0.086,0.086,0.118,0.95]},
+                \\  {"type":"text","id":"status_left","x":12,"y":578,"text":"0 items selected",
+                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
+                \\]}
+            ;
+            createKdpWindow(ctx, "Files", files_json);
+        }
+        return;
+    }
 }
 
 // ============================================================
@@ -700,8 +880,8 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, ctx: *Cont
     }
 }
 
-/// 创建 KDP 窗口：wl_surface + river_shell_surface + kairo_surface + set_layer(wm)
-fn createKdpWindow(ctx: *Context, title: []const u8, json: [:0]const u8) void {
+/// 创建 KDP 窗口，支持指定渲染层
+fn createKdpWindowWithLayer(ctx: *Context, title: []const u8, json: [:0]const u8, layer: kairo.SurfaceV1.Layer) void {
     const wm = ctx.wm_global orelse return;
     const compositor = ctx.compositor_global orelse return;
     const kd = ctx.kairo_display orelse return;
@@ -730,8 +910,8 @@ fn createKdpWindow(ctx: *Context, title: []const u8, json: [:0]const u8) void {
         return;
     };
 
-    // 5. 设置为 wm 层（参与窗口管理布局）
-    k_surface.setLayer(.wm);
+    // 5. 设置渲染层
+    k_surface.setLayer(layer);
 
     // 6. 设置标题
     k_surface.setTitle(@ptrCast(title.ptr));
@@ -747,18 +927,28 @@ fn createKdpWindow(ctx: *Context, title: []const u8, json: [:0]const u8) void {
         .kairo_surface = k_surface,
         .node = node,
         .title = title,
+        .ctx = ctx,
     };
+
+    // 9. 设置 KDP surface 事件监听器（处理 user_action 等）
+    k_surface.setListener(*KdpWindow, kairoSurfaceListener, kdp_win);
+
     ctx.kdp_windows.append(ctx.allocator, kdp_win) catch {
         ctx.allocator.destroy(kdp_win);
         return;
     };
 
-    // 自动聚焦第一个窗口
-    if (ctx.focused == null) {
+    // wm 层窗口自动聚焦
+    if (layer == .wm and ctx.focused == null) {
         ctx.pending_focus = .{ .shell_surface = shell_surface };
     }
 
-    std.debug.print("WM: 创建 KDP 窗口 '{s}' (total KDP: {})\n", .{ title, ctx.kdp_windows.items.len });
+    std.debug.print("WM: 创建 KDP 窗口 '{s}' layer={} (total KDP: {})\n", .{ title, @intFromEnum(layer), ctx.kdp_windows.items.len });
+}
+
+/// 创建 KDP 窗口（默认 wm 层）
+fn createKdpWindow(ctx: *Context, title: []const u8, json: [:0]const u8) void {
+    createKdpWindowWithLayer(ctx, title, json, .wm);
 }
 
 pub fn main() !void {
@@ -823,51 +1013,60 @@ pub fn main() !void {
     if (display.flush() != .SUCCESS) return error.RoundtripFailed;
     std.debug.print("After second roundtrip: windows={}, outputs={}\n", .{ ctx.windows.items.len, ctx.outputs.items.len });
 
-    // 创建品牌窗口（KDP，wm 层，参与布局）
+    // 创建壁纸 + 桌面图标（background 层）
     if (ctx.kairo_display != null and ctx.compositor_global != null and ctx.wm_global != null) {
-        const brand_json =
+        const wallpaper_json =
             \\{"type":"root","children":[
-            \\  {"type":"rect","id":"bg","x":0,"y":0,"width":480,"height":560,
+            \\  {"type":"rect","id":"wallpaper-base","x":0,"y":0,"width":1280,"height":720,
             \\   "color":[0.051,0.051,0.071,1.0]},
-            \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":480,"height":36,
-            \\   "color":[0.0,0.0,0.0,0.0]},
-            \\  {"type":"rect","id":"btn_close","x":452,"y":10,"width":16,"height":16,
-            \\   "color":[0.557,0.557,0.604,0.3],"action":"close"},
-            \\  {"type":"text","id":"logo","x":220,"y":180,"text":"<>",
+            \\  {"type":"rect","id":"wallpaper-glow","x":440,"y":260,"width":400,"height":200,
+            \\   "color":[0.29,0.486,1.0,0.03],"radius":200},
+            \\  {"type":"rect","id":"desktop-icon-terminal","x":24,"y":24,"width":64,"height":64,
+            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:terminal"},
+            \\  {"type":"text","id":"desktop-icon-symbol-terminal","x":40,"y":40,"text":">_",
             \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
-            \\  {"type":"text","id":"brand_name","x":184,"y":228,"text":"K A I R O",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":4},
-            \\  {"type":"text","id":"subtitle","x":176,"y":268,"text":"Agent-Native OS",
-            \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
-            \\  {"type":"rect","id":"divider","x":180,"y":300,"width":120,"height":1,
-            \\   "color":[0.165,0.165,0.235,0.5]},
-            \\  {"type":"rect","id":"card_terminal","x":88,"y":324,"width":140,"height":72,
-            \\   "color":[0.118,0.118,0.165,0.92],"action":"launch_terminal"},
-            \\  {"type":"text","id":"card_terminal_icon","x":100,"y":340,"text":">_",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
-            \\  {"type":"text","id":"card_terminal_label","x":100,"y":368,"text":"Terminal",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-            \\  {"type":"rect","id":"card_files","x":252,"y":324,"width":140,"height":72,
-            \\   "color":[0.118,0.118,0.165,0.92],"action":"launch_files"},
-            \\  {"type":"text","id":"card_files_icon","x":264,"y":340,"text":"[]",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
-            \\  {"type":"text","id":"card_files_label","x":264,"y":368,"text":"Files",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-            \\  {"type":"rect","id":"status_panel","x":100,"y":420,"width":280,"height":96,
-            \\   "color":[0.118,0.118,0.165,0.92]},
-            \\  {"type":"text","id":"status_title","x":112,"y":432,"text":"System Status",
-            \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
-            \\  {"type":"text","id":"status_agent","x":112,"y":452,"text":"Agent: Ready",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-            \\  {"type":"text","id":"status_memory","x":112,"y":474,"text":"Memory: -- / --",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-            \\  {"type":"text","id":"status_uptime","x":112,"y":496,"text":"Uptime: 00:00:00",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-            \\  {"type":"text","id":"version","x":196,"y":536,"text":"v0.1.0-alpha",
-            \\   "color":[0.353,0.353,0.431,0.6],"scale":1}
+            \\  {"type":"text","id":"desktop-icon-label-terminal","x":28,"y":92,"text":"Terminal",
+            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
+            \\  {"type":"rect","id":"desktop-icon-files","x":24,"y":124,"width":64,"height":64,
+            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:files"},
+            \\  {"type":"text","id":"desktop-icon-symbol-files","x":40,"y":140,"text":"[]",
+            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
+            \\  {"type":"text","id":"desktop-icon-label-files","x":28,"y":192,"text":"Files",
+            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
+            \\  {"type":"rect","id":"desktop-icon-chrome","x":24,"y":224,"width":64,"height":64,
+            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:chrome"},
+            \\  {"type":"text","id":"desktop-icon-symbol-chrome","x":40,"y":240,"text":"@",
+            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
+            \\  {"type":"text","id":"desktop-icon-label-chrome","x":28,"y":292,"text":"Chrome",
+            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
+            \\  {"type":"rect","id":"desktop-icon-agent","x":24,"y":324,"width":64,"height":64,
+            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:agent"},
+            \\  {"type":"text","id":"desktop-icon-symbol-agent","x":40,"y":340,"text":"*",
+            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
+            \\  {"type":"text","id":"desktop-icon-label-agent","x":28,"y":392,"text":"Agent",
+            \\   "color":[0.91,0.91,0.93,1.0],"scale":1}
             \\]}
         ;
-        createKdpWindow(&ctx, "Kairo", brand_json);
+        createKdpWindowWithLayer(&ctx, "Wallpaper", wallpaper_json, .background);
+
+        // 创建任务栏（bottom 层）
+        const panel_json =
+            \\{"type":"root","children":[
+            \\  {"type":"rect","id":"panel-bg","x":0,"y":0,"width":1280,"height":36,
+            \\   "color":[0.086,0.086,0.118,0.95]},
+            \\  {"type":"rect","id":"panel-border-top","x":0,"y":0,"width":1280,"height":1,
+            \\   "color":[0.165,0.165,0.235,0.5]},
+            \\  {"type":"rect","id":"panel-logo-bg","x":8,"y":6,"width":24,"height":24,
+            \\   "color":[0,0,0,0],"action":"launcher_toggle"},
+            \\  {"type":"text","id":"panel-logo","x":12,"y":10,"text":"<>",
+            \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
+            \\  {"type":"rect","id":"panel-agent-dot","x":1200,"y":14,"width":8,"height":8,
+            \\   "color":[0.204,0.78,0.349,1.0],"radius":4},
+            \\  {"type":"text","id":"panel-clock","x":1216,"y":14,"text":"00:00",
+            \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
+            \\]}
+        ;
+        createKdpWindowWithLayer(&ctx, "Panel", panel_json, .bottom);
     } else {
         std.debug.print("Skipping KDP (globals not found)\n", .{});
     }

@@ -44,12 +44,18 @@ export const PREINSTALLED_APPS: AppEntry[] = [
     category: "系统",
   },
   {
-    id: "chromium",
-    name: "Chromium",
-    icon: "O",
-    type: "native",
-    command: "chromium-browser --no-sandbox --ozone-platform=wayland",
+    id: "chrome",
+    name: "Chrome",
+    icon: "@",
+    type: "kdp",
     category: "应用",
+  },
+  {
+    id: "agent",
+    name: "Agent",
+    icon: "*",
+    type: "kdp",
+    category: "系统",
   },
 ];
 

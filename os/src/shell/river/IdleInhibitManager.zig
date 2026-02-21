@@ -42,7 +42,7 @@ pub fn checkActive(inhibit_manager: *IdleInhibitManager) void {
         const node_data = SceneNodeData.fromSurface(inhibitor.wlr_inhibitor.surface) orelse continue;
         switch (node_data.data) {
             // TODO be stricter here so that clients don't abuse the protocol
-            .window, .shell_surface, .lock_surface, .layer_surface, .override_redirect => {
+            .window, .shell_surface, .lock_surface, .layer_surface, .override_redirect, .kairo_surface => {
                 inhibited = true;
                 break;
             },

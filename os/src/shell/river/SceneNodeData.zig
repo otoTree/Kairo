@@ -15,6 +15,7 @@ const InputPopup = @import("InputPopup.zig");
 const Window = @import("Window.zig");
 const ShellSurface = @import("ShellSurface.zig");
 const XwaylandOverrideRedirect = @import("XwaylandOverrideRedirect.zig");
+const KairoDisplay = @import("KairoDisplay.zig");
 
 pub const Data = union(enum) {
     window: *Window,
@@ -22,6 +23,7 @@ pub const Data = union(enum) {
     lock_surface: *LockSurface,
     layer_surface: *LayerSurface,
     override_redirect: if (build_options.xwayland) *XwaylandOverrideRedirect else noreturn,
+    kairo_surface: *KairoDisplay.KairoSurface,
 };
 
 node: *wlr.SceneNode,

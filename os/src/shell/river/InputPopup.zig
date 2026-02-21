@@ -101,6 +101,8 @@ pub fn update(input_popup: *InputPopup) void {
         .layer_surface => |layer_surface| layer_surface.popup_tree,
         // Xwayland doesn't use the text-input protocol
         .override_redirect => unreachable,
+        // KDP surfaces don't use text-input
+        .kairo_surface => return,
     };
 
     input_popup.surface_tree.node.reparent(popup_tree);

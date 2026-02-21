@@ -369,7 +369,7 @@ fn updateHovered(cursor: *Cursor) void {
                     .destroying => {},
                 }
             },
-            .shell_surface, .lock_surface, .layer_surface => {
+            .shell_surface, .lock_surface, .layer_surface, .kairo_surface => {
                 cursor.seat.wm_scheduled.hovered = null;
             },
             .override_redirect => {
@@ -437,6 +437,11 @@ pub fn processButton(cursor: *Cursor, event: *const wlr.Pointer.event.Button) vo
             .passthrough => {
                 if (server.scene.at(cursor.wlr_cursor.x, cursor.wlr_cursor.y)) |at| {
                     cursor.interact(at);
+
+                    // KDP surface 没有 wl_surface，点击已在 interact 中处理
+                    if (at.data == .kairo_surface) {
+                        return;
+                    }
 
                     if (at.surface != null) {
                         _ = cursor.seat.wlr_seat.pointerNotifyButton(event.time_msec, event.button, event.state);
@@ -549,6 +554,13 @@ fn interact(cursor: Cursor, result: Scene.AtResult) void {
         .override_redirect => |override_redirect| {
             assert(server.lock_manager.state != .locked);
             override_redirect.focusIfDesired();
+        },
+        .kairo_surface => |kairo_surface| {
+            // KDP surface 点击：执行命中测试并发送 user_action 事件
+            kairo_surface.handlePointerClick(
+                @intFromFloat(result.sx),
+                @intFromFloat(result.sy),
+            );
         },
     }
 }
