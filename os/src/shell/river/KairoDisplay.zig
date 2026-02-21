@@ -3,6 +3,7 @@ const wayland = @import("wayland");
 const wl = wayland.server.wl;
 const wlr = @import("wlroots");
 const Server = @import("Server.zig");
+const SceneNodeData = @import("SceneNodeData.zig");
 const kairo = wayland.server.kairo;
 
 const ft = @cImport({
@@ -131,7 +132,7 @@ const SurfaceLayer = enum(u32) {
     bottom = 3,     // 底部层（任务栏）
 };
 
-const KairoSurface = struct {
+pub const KairoSurface = struct {
     server: *Server,
     surface_resource: *wl.Surface,
     resource: *kairo.SurfaceV1,
@@ -225,8 +226,9 @@ const KairoSurface = struct {
                 y >= region.y and y < region.y + region.height)
             {
                 // 命中！发送 user_action 事件
-                log.info("KDP: user_action hit: {s} at ({}, {})", .{ region.element_id, x, y });
-                self.sendUserAction(region.element_id, region.action_type, "{}");
+                // action_type 固定为 "click"（交互类型），region 的 action 值作为 payload 传递
+                log.info("KDP: user_action hit: {s} action={s} at ({}, {})", .{ region.element_id, region.action_type, x, y });
+                self.sendUserAction(region.element_id, "click", region.action_type);
                 return;
             }
         }
@@ -304,6 +306,11 @@ const KairoSurface = struct {
             tree.node.destroy();
             self.overlay_tree = null;
         }
+        // 释放旧命中区域的复制字符串
+        for (self.hit_regions.items) |region| {
+            std.heap.c_allocator.free(@constCast(region.element_id));
+            std.heap.c_allocator.free(@constCast(region.action_type));
+        }
         self.hit_regions.clearRetainingCapacity();
 
         // 根据 layer 选择目标场景层
@@ -319,6 +326,11 @@ const KairoSurface = struct {
             return;
         };
         self.overlay_tree = tree;
+
+        // 注册 SceneNodeData，使 River 的命中测试能识别 KDP surface
+        SceneNodeData.attach(&tree.node, .{ .kairo_surface = self }) catch {
+            log.err("KDP: 无法注册 SceneNodeData", .{});
+        };
 
         // 对非 wm 层的 surface，应用几何位置
         if (self.layer != .wm) {
@@ -401,13 +413,19 @@ fn renderElementWithHitTest(parent: *wlr.SceneTree, element: *const UIElement, s
         const eid = element.id orelse "anonymous";
         const w = element.width orelse 100;
         const h = element.height orelse 40;
+        // 复制字符串，避免 JSON 解析结果释放后悬空指针
+        const eid_copy = std.heap.c_allocator.dupe(u8, eid) catch return;
+        const action_copy = std.heap.c_allocator.dupe(u8, action) catch {
+            std.heap.c_allocator.free(eid_copy);
+            return;
+        };
         surface.hit_regions.append(std.heap.c_allocator, .{
-            .element_id = eid,
+            .element_id = eid_copy,
             .x = ex,
             .y = ey,
             .width = w,
             .height = h,
-            .action_type = action,
+            .action_type = action_copy,
         }) catch {};
     }
 
