@@ -120,16 +120,21 @@ fn kairoSurfaceListener(surface: *kairo.SurfaceV1, event: kairo.SurfaceV1.Event,
             const action_type = std.mem.span(ev.action_type);
             std.debug.print("KDP user_action: element={s} action={s}\n", .{ element_id, action_type });
 
-            // 处理桌面图标点击 → 通过 IPC 发送 desktop.launch_app 命令
+            // 处理桌面图标点击 → 提取纯净 appId 并启动对应窗口
             if (std.mem.startsWith(u8, element_id, "desktop-icon-") and std.mem.eql(u8, action_type, "click")) {
-                const app_id = element_id["desktop-icon-".len..];
-                std.debug.print("Desktop icon clicked: {s}\n", .{app_id});
+                var raw_id = element_id["desktop-icon-".len..];
+                // 去除 symbol- / label- 前缀，提取纯净 appId
+                if (std.mem.startsWith(u8, raw_id, "symbol-")) {
+                    raw_id = raw_id["symbol-".len..];
+                } else if (std.mem.startsWith(u8, raw_id, "label-")) {
+                    raw_id = raw_id["label-".len..];
+                }
+                std.debug.print("Desktop icon clicked: {s}\n", .{raw_id});
 
                 // 直接在 WM 中创建对应窗口
                 if (kdp_win.ctx) |ctx| {
-                    // 构造 IPC 命令载荷
                     var buf: [256]u8 = undefined;
-                    const payload = std.fmt.bufPrint(&buf, "desktop.launch_app:{s}", .{app_id}) catch return;
+                    const payload = std.fmt.bufPrint(&buf, "desktop.launch_app:{s}", .{raw_id}) catch return;
                     const packet = ipc.Client.Packet{
                         .type = .EVENT,
                         .payload = payload,
@@ -141,10 +146,18 @@ fn kairoSurfaceListener(surface: *kairo.SurfaceV1, event: kairo.SurfaceV1.Event,
             // 处理窗口关闭按钮
             if (std.mem.eql(u8, element_id, "btn_close") or std.mem.eql(u8, element_id, "btn-close")) {
                 std.debug.print("Close button clicked on KDP window\n", .{});
-                // TODO: 关闭窗口
+                if (kdp_win.ctx) |ctx| {
+                    closeKdpWindow(ctx, kdp_win);
+                }
             }
         },
-        .key_event => {},
+        .key_event => |ev| {
+            // 将键盘事件通过 IPC 转发给内核（供 TypeScript 终端控制器处理）
+            if (kdp_win.ctx) |ctx| {
+                std.debug.print("KDP key_event: key={} state={} mods={} on '{s}'\n", .{ ev.key, ev.state, ev.modifiers, kdp_win.title });
+                forwardKeyEvent(ctx, kdp_win.title, ev.key, ev.state, ev.modifiers);
+            }
+        },
         .pointer_event => {},
         .focus_event => {},
         else => {},
@@ -577,16 +590,108 @@ fn closeCurrentWindow(ctx: *Context) void {
     switch (ctx.focused.?) {
         .window => |w| w.close(),
         .shell_surface => |ss| {
-            // KDP 窗口：销毁 shell surface（WM 端关闭）
+            // KDP 窗口：通过 closeKdpWindow 完整销毁
             for (ctx.kdp_windows.items) |kdp_win| {
                 if (kdp_win.shell_surface == ss) {
-                    kdp_win.kairo_surface.destroy();
-                    break;
+                    closeKdpWindow(ctx, kdp_win);
+                    return;
                 }
             }
         },
     }
     std.debug.print("WM: close current window\n", .{});
+}
+
+/// 关闭指定 KDP 窗口（销毁 surface 并从列表移除）
+fn closeKdpWindow(ctx: *Context, target: *KdpWindow) void {
+    // 如果当前焦点是该窗口，清除焦点
+    if (ctx.focused) |f| {
+        switch (f) {
+            .shell_surface => |ss| {
+                if (ss == target.shell_surface) {
+                    ctx.focused = null;
+                }
+            },
+            .window => {},
+        }
+    }
+
+    // 销毁 Wayland 资源
+    target.kairo_surface.destroy();
+    target.shell_surface.destroy();
+    target.wl_surface.destroy();
+
+    // 从列表中移除
+    for (ctx.kdp_windows.items, 0..) |kdp_win, i| {
+        if (kdp_win == target) {
+            _ = ctx.kdp_windows.orderedRemove(i);
+            ctx.allocator.destroy(target);
+            break;
+        }
+    }
+
+    // 切换焦点到下一个可见窗口
+    if (ctx.focused == null and totalWindowCount(ctx) > 0) {
+        cycleFocusNext(ctx);
+    }
+
+    // 触发重新布局
+    if (ctx.wm_global) |wm| wm.manageDirty();
+    std.debug.print("WM: closed KDP window (remaining: {})\n", .{ctx.kdp_windows.items.len});
+}
+
+/// 将键盘事件通过 IPC 转发给内核
+fn forwardKeyEvent(ctx: *Context, window_title: []const u8, key: u32, state: u32, modifiers: u32) void {
+    const client = ctx.ipc_client orelse return;
+
+    var payload = std.ArrayList(u8){};
+    defer payload.deinit(ctx.allocator);
+
+    // 编码 MsgPack: { topic: "window.key_event", window: title, key: uint, state: uint, modifiers: uint }
+    ipc.encodeMapHeader(&payload, ctx.allocator, 5) catch return;
+    ipc.encodeString(&payload, ctx.allocator, "topic") catch return;
+    ipc.encodeString(&payload, ctx.allocator, "window.key_event") catch return;
+    ipc.encodeString(&payload, ctx.allocator, "window") catch return;
+    ipc.encodeString(&payload, ctx.allocator, window_title) catch return;
+    ipc.encodeString(&payload, ctx.allocator, "key") catch return;
+    encodeUint32(&payload, ctx.allocator, key) catch return;
+    ipc.encodeString(&payload, ctx.allocator, "state") catch return;
+    encodeUint32(&payload, ctx.allocator, state) catch return;
+    ipc.encodeString(&payload, ctx.allocator, "modifiers") catch return;
+    encodeUint32(&payload, ctx.allocator, modifiers) catch return;
+
+    const len: u32 = @intCast(payload.items.len);
+    var header: [8]u8 = undefined;
+    std.mem.writeInt(u16, header[0..2], ipc.MAGIC, .big);
+    header[2] = ipc.VERSION;
+    header[3] = @intFromEnum(ipc.PacketType.EVENT);
+    std.mem.writeInt(u32, header[4..8], len, .big);
+    client.stream.writeAll(&header) catch return;
+    client.stream.writeAll(payload.items) catch return;
+}
+
+/// MsgPack uint32 编码
+fn encodeUint32(list: *std.ArrayList(u8), allocator: std.mem.Allocator, val: u32) !void {
+    if (val < 128) {
+        // positive fixint
+        try list.append(allocator, @intCast(val));
+    } else if (val < 256) {
+        // uint 8
+        try list.append(allocator, 0xCC);
+        try list.append(allocator, @intCast(val));
+    } else if (val < 65536) {
+        // uint 16
+        try list.append(allocator, 0xCD);
+        var buf: [2]u8 = undefined;
+        std.mem.writeInt(u16, &buf, @intCast(val), .big);
+        try list.appendSlice(allocator, &buf);
+    } else {
+        // uint 32
+        try list.append(allocator, 0xCE);
+        var buf: [4]u8 = undefined;
+        std.mem.writeInt(u32, &buf, val, .big);
+        try list.appendSlice(allocator, &buf);
+    }
 }
 
 /// 处理来自内核的 IPC 命令
@@ -713,9 +818,21 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
     }
 
     // 桌面图标点击：创建对应应用窗口
-    if (std.mem.indexOf(u8, payload, "desktop.launch_app") != null) {
-        // 解析 appId
-        if (std.mem.indexOf(u8, payload, "chrome") != null) {
+    if (std.mem.indexOf(u8, payload, "desktop.launch_app:") != null) {
+        // 从 payload 中精确提取 appId（冒号后的部分）
+        const marker = "desktop.launch_app:";
+        const marker_idx = std.mem.indexOf(u8, payload, marker) orelse return;
+        const app_id_start = marker_idx + marker.len;
+        if (app_id_start >= payload.len) return;
+        // appId 到 payload 末尾（纯文本）或下一个非字母字符（MsgPack）
+        var app_id_end = app_id_start;
+        while (app_id_end < payload.len and payload[app_id_end] >= 0x20 and payload[app_id_end] < 0x7F) {
+            app_id_end += 1;
+        }
+        const app_id = payload[app_id_start..app_id_end];
+        std.debug.print("WM: launch_app exact id='{s}'\n", .{app_id});
+
+        if (std.mem.eql(u8, app_id, "chrome")) {
             const chrome_json =
                 \\{"type":"root","children":[
                 \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
@@ -746,7 +863,7 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
                 \\]}
             ;
             createKdpWindow(ctx, "Chrome", chrome_json);
-        } else if (std.mem.indexOf(u8, payload, "agent") != null) {
+        } else if (std.mem.eql(u8, app_id, "agent")) {
             const agent_json =
                 \\{"type":"root","children":[
                 \\  {"type":"rect","id":"bg","x":0,"y":0,"width":600,"height":500,
@@ -788,7 +905,7 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
                 \\]}
             ;
             createKdpWindow(ctx, "Agent", agent_json);
-        } else if (std.mem.indexOf(u8, payload, "terminal") != null) {
+        } else if (std.mem.eql(u8, app_id, "terminal")) {
             const term_json =
                 \\{"type":"root","children":[
                 \\  {"type":"rect","id":"bg","x":0,"y":0,"width":800,"height":500,
@@ -814,7 +931,7 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
                 \\]}
             ;
             createKdpWindow(ctx, "Terminal", term_json);
-        } else if (std.mem.indexOf(u8, payload, "files") != null) {
+        } else if (std.mem.eql(u8, app_id, "files")) {
             const files_json =
                 \\{"type":"root","children":[
                 \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
