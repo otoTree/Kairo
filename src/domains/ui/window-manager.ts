@@ -62,6 +62,8 @@ export interface WindowManagerCallbacks {
   onCommit?: (surfaceId: string, tree: KdpNode) => void;
   /** 窗口被销毁 */
   onDestroy?: (surfaceId: string) => void;
+  /** 发送 IPC 命令到 WM */
+  onIpcCommand?: (command: string, data?: Record<string, any>) => void;
 }
 
 export class WindowManager {
@@ -181,5 +183,40 @@ export class WindowManager {
       if (win.focused) return win;
     }
     return undefined;
+  }
+
+  /** 5.1: 最小化窗口 */
+  minimizeWindow(windowId: string): void {
+    this.callbacks.onIpcCommand?.("window.minimize", { id: windowId });
+  }
+
+  /** 5.1: 最大化/还原窗口 */
+  maximizeWindow(windowId: string): void {
+    this.callbacks.onIpcCommand?.("window.maximize", { id: windowId });
+  }
+
+  /** 关闭窗口 */
+  closeWindow(windowId: string): void {
+    this.callbacks.onIpcCommand?.("window.close", { id: windowId });
+  }
+
+  /** 切换焦点到指定窗口 */
+  focusWindow(windowId: string): void {
+    this.callbacks.onIpcCommand?.("window.focus", { id: windowId });
+  }
+
+  /** Alt+Tab 焦点循环 */
+  cycleFocus(): void {
+    this.callbacks.onIpcCommand?.("window.cycle");
+  }
+
+  /** 切换启动器 */
+  toggleLauncher(): void {
+    this.callbacks.onIpcCommand?.("desktop.launcher.toggle");
+  }
+
+  /** 5.2: 开始拖拽移动 */
+  startDrag(): void {
+    this.callbacks.onIpcCommand?.("window.drag");
   }
 }

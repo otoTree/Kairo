@@ -12,10 +12,10 @@ echo "=== Kairo River 部署脚本 ==="
 echo "VM: $VM_NAME"
 
 # 检查二进制是否存在
-for bin in river kairo-wm; do
+for bin in river kairo-wm kairo-kernel; do
   if [ ! -f "$DIST_DIR/$bin" ]; then
     echo "错误: $DIST_DIR/$bin 不存在"
-    echo "请先执行: cd os && ./build_docker.sh"
+    echo "请先执行: cd os && ./build_docker.sh && bun build --compile --target=bun-linux-arm64 src/index.ts --outfile os/dist/kairo-kernel"
     exit 1
   fi
 done
@@ -24,6 +24,7 @@ done
 echo "传输二进制文件..."
 limactl copy "$DIST_DIR/river" "${VM_NAME}:/tmp/river"
 limactl copy "$DIST_DIR/kairo-wm" "${VM_NAME}:/tmp/kairo-wm"
+limactl copy "$DIST_DIR/kairo-kernel" "${VM_NAME}:/tmp/kairo-kernel"
 limactl copy "$KAIRO_DIR/os/src/shell/config/init" "${VM_NAME}:/tmp/river-init"
 limactl copy "$KAIRO_DIR/scripts/start-river.sh" "${VM_NAME}:/tmp/start-river"
 
@@ -32,7 +33,8 @@ echo "安装到 VM..."
 limactl shell "$VM_NAME" -- sh -c '
   sudo cp /tmp/river /usr/local/bin/river
   sudo cp /tmp/kairo-wm /usr/local/bin/kairo-wm
-  sudo chmod +x /usr/local/bin/river /usr/local/bin/kairo-wm
+  sudo cp /tmp/kairo-kernel /usr/local/bin/kairo-kernel
+  sudo chmod +x /usr/local/bin/river /usr/local/bin/kairo-wm /usr/local/bin/kairo-kernel
 
   mkdir -p "$HOME/.config/river"
   cp /tmp/river-init "$HOME/.config/river/init"
@@ -41,14 +43,15 @@ limactl shell "$VM_NAME" -- sh -c '
   sudo cp /tmp/start-river /usr/local/bin/start-river
   sudo chmod +x /usr/local/bin/start-river
 
-  rm -f /tmp/river /tmp/kairo-wm /tmp/river-init /tmp/start-river
+  rm -f /tmp/river /tmp/kairo-wm /tmp/kairo-kernel /tmp/river-init /tmp/start-river
 
   echo ""
   echo "=== 验证 ==="
-  echo "river:    $(which river 2>/dev/null || echo 未找到)"
-  echo "kairo-wm: $(which kairo-wm 2>/dev/null || echo 未找到)"
-  echo "foot:     $(which foot 2>/dev/null || echo 未找到)"
-  echo "init:     $HOME/.config/river/init"
+  echo "river:        $(which river 2>/dev/null || echo 未找到)"
+  echo "kairo-wm:     $(which kairo-wm 2>/dev/null || echo 未找到)"
+  echo "kairo-kernel: $(which kairo-kernel 2>/dev/null || echo 未找到)"
+  echo "foot:         $(which foot 2>/dev/null || echo 未找到)"
+  echo "init:         $HOME/.config/river/init"
 '
 
 echo ""

@@ -34,6 +34,9 @@ export class SkillsPlugin implements Plugin {
       } catch {
           return false;
       }
+  }
+
+  async setup(app: Application) {
     this.app = app;
     app.registerService("skills", this);
 

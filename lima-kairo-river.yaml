@@ -62,6 +62,9 @@ provision:
     # 终端模拟器
     apk add --no-cache foot
 
+    # 浏览器
+    apk add --no-cache chromium
+
     # 基础工具
     apk add --no-cache bash shadow sudo
 

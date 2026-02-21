@@ -1,15 +1,18 @@
 import { AIPlugin } from "../ai/ai.plugin";
 import { type MemoryEntry, type MemoryQuery, type MemoryResult, MemoryLayer, type MemoryAttributes } from "./types";
-import { open, type RootDatabase } from "lmdb";
-import hnswlib from "hnswlib-node";
+// lmdb / hnswlib-node: 运行时动态导入，避免 bundler 打包原生模块
+let lmdbOpen: any = null;
+let hnswlib: any = null;
+try { const m = 'lmdb'; lmdbOpen = require(m).open; } catch {}
+try { const m = 'hnswlib-node'; hnswlib = require(m); } catch {}
 import MiniSearch from "minisearch";
 import path from "path";
 import fs from "fs/promises";
 import { existsSync } from "fs";
 
 export class MemCube {
-  private lmdb?: RootDatabase;
-  private index?: hnswlib.HierarchicalNSW;
+  private lmdb?: any;
+  private index?: any;
   private miniSearch?: MiniSearch;
   
   private storagePath: string;
@@ -42,7 +45,11 @@ export class MemCube {
       }
 
       // 1. Initialize LMDB
-      this.lmdb = open({
+      if (!lmdbOpen) {
+        console.warn('[MemCube] lmdb 模块不可用，内存系统降级运行');
+        return;
+      }
+      this.lmdb = lmdbOpen({
           path: this.storagePath,
           compression: true,
       });
@@ -84,6 +91,10 @@ export class MemCube {
   }
 
   private async loadHNSW() {
+      if (!hnswlib) {
+        console.warn('[MemCube] hnswlib-node 模块不可用，向量搜索降级');
+        return;
+      }
       const indexPath = path.join(this.storagePath, "vector.index");
       this.index = new hnswlib.HierarchicalNSW("cosine", this.dimension);
       

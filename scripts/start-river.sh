@@ -3,10 +3,12 @@
 # 需要从 TTY 或 SSH 执行 (不能在已有的 Wayland/X11 会话内)
 set -eu
 
-# 确保 seatd 运行
-if ! rc-service seatd status >/dev/null 2>&1; then
-  echo "启动 seatd..."
-  sudo rc-service seatd start
+# seat 管理：停止系统 seatd，改用 seatd-launch 为当前会话分配 seat
+# （SSH 会话无法从系统 seatd 获取 seat）
+if rc-service seatd status >/dev/null 2>&1; then
+  echo "停止系统 seatd（改用 seatd-launch）..."
+  sudo rc-service seatd stop
+  sleep 0.5
 fi
 
 # 确保 udev-trigger 已运行（libinput 依赖 udev 属性识别输入设备）
@@ -39,4 +41,9 @@ echo "WLR_RENDERER:    $WLR_RENDERER"
 echo "River init:      $HOME/.config/river/init"
 echo ""
 
-exec river -log-level debug
+# 通过 seatd-launch 启动（SSH 会话需要独立 seat 分配）
+if command -v seatd-launch >/dev/null 2>&1; then
+  exec seatd-launch -- river -log-level debug
+else
+  exec river -log-level debug
+fi

@@ -1,23 +1,28 @@
 #!/bin/sh
-# Kairo River Init Script
-# River 0.4.0: riverctl 已移除，焦点/键绑定由 kairo-wm 管理
+# Kairo Desktop Environment Init Script
+# 启动桌面环境：WM → 桌面 Shell（壁纸/面板/品牌窗口）
 
-# 终端: foot (轻量级 Wayland 终端), 回退到 alacritty
-TERM_CMD="foot"
-command -v foot >/dev/null 2>&1 || TERM_CMD="alacritty"
+# --- 环境变量 ---
+export PATH="/usr/local/bin:$PATH"
+export PYTHON_ENV_PATH="$HOME/.kairo/python_env"
 
-# --- Layout (Managed by Kairo WM) ---
+# --- 窗口管理器 ---
 kairo-wm > /tmp/kairo-wm.log 2>&1 &
 
-# --- 自动启动终端窗口 (用于验证布局) ---
 # 等待 kairo-wm 连接就绪
 sleep 1
 
-# 打开 3 个终端窗口，验证 Master/Stack 布局:
-# 第 1 个窗口占左半屏 (Master)
-# 第 2、3 个窗口分享右半屏 (Stack)
-$TERM_CMD &
-sleep 0.3
-$TERM_CMD &
-sleep 0.3
-$TERM_CMD &
+# --- Kairo 内核（编译后的独立二进制） ---
+# 内核负责：壁纸/面板/启动器的 KDP 渲染、IPC 事件路由
+if command -v kairo-kernel >/dev/null 2>&1; then
+  kairo-kernel > /tmp/kairo-kernel.log 2>&1 &
+  sleep 1
+fi
+
+# --- 回退：如果内核未启动，打开终端窗口供调试 ---
+TERM_CMD="foot"
+command -v foot >/dev/null 2>&1 || TERM_CMD="alacritty"
+
+if ! pgrep -f "kairo-kernel" >/dev/null 2>&1 && ! pgrep -f "bun-runtime" >/dev/null 2>&1; then
+  $TERM_CMD &
+fi

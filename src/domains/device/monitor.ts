@@ -1,6 +1,11 @@
 import { DeviceRegistry, type DeviceInfo, type DeviceType } from './registry';
 // import usbDetect from 'usb-detection';
-import { SerialPort } from 'serialport';
+// serialport: 运行时动态导入，避免 bundler 打包原生模块导致编译错误
+let SerialPortClass: any = null;
+try {
+  const mod = 'serialport';
+  SerialPortClass = globalThis.require?.(mod)?.SerialPort ?? require(mod).SerialPort;
+} catch {}
 
 export class DeviceMonitor {
   constructor(private registry: DeviceRegistry) {}
@@ -121,7 +126,7 @@ export class DeviceMonitor {
 
   private async findSerialPath(vid: number, pid: number, serialNumber?: string): Promise<string> {
       try {
-          const ports = await SerialPort.list();
+          const ports = await SerialPortClass.list();
           // SerialPort returns vid/pid as lowercase hex strings usually
           const vidHex = vid.toString(16).toLowerCase().padStart(4, '0');
           const pidHex = pid.toString(16).toLowerCase().padStart(4, '0');

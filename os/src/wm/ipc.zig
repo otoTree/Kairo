@@ -176,9 +176,49 @@ pub const Client = struct {
 
         return null;
     }
+    /// 发送窗口列表变更事件到内核
+    /// 编码为 MsgPack EVENT 帧：{ topic: "window.list.changed", windows: [...] }
+    pub fn sendWindowListEvent(self: *Client, allocator: std.mem.Allocator, window_titles: []const []const u8, focused_idx: ?usize) !void {
+        var payload = std.ArrayList(u8){};
+        defer payload.deinit(allocator);
+
+        // { topic: "window.list.changed", windows: [ { title: "...", focused: true/false }, ... ] }
+        try encodeMapHeader(&payload, allocator, 2);
+        try encodeString(&payload, allocator, "topic");
+        try encodeString(&payload, allocator, "window.list.changed");
+        try encodeString(&payload, allocator, "windows");
+
+        // 编码数组头
+        const count: u8 = @intCast(@min(window_titles.len, 15));
+        try payload.append(allocator, 0x90 | count); // fixarray
+
+        for (window_titles[0..count], 0..) |title, i| {
+            try encodeMapHeader(&payload, allocator, 2);
+            try encodeString(&payload, allocator, "title");
+            try encodeString(&payload, allocator, title);
+            try encodeString(&payload, allocator, "focused");
+            // MsgPack bool: 0xC3 = true, 0xC2 = false
+            if (focused_idx != null and focused_idx.? == i) {
+                try payload.append(allocator, 0xC3);
+            } else {
+                try payload.append(allocator, 0xC2);
+            }
+        }
+
+        // 发送 EVENT 帧
+        const len: u32 = @intCast(payload.items.len);
+        var header: [8]u8 = undefined;
+        std.mem.writeInt(u16, header[0..2], MAGIC, .big);
+        header[2] = VERSION;
+        header[3] = @intFromEnum(PacketType.EVENT);
+        std.mem.writeInt(u32, header[4..8], len, .big);
+
+        try self.stream.writeAll(&header);
+        try self.stream.writeAll(payload.items);
+    }
 };
 
-fn encodeMapHeader(list: *std.ArrayList(u8), allocator: std.mem.Allocator, size: u8) !void {
+pub fn encodeMapHeader(list: *std.ArrayList(u8), allocator: std.mem.Allocator, size: u8) !void {
     if (size < 16) {
         try list.append(allocator, 0x80 | size);
     } else {
@@ -186,7 +226,7 @@ fn encodeMapHeader(list: *std.ArrayList(u8), allocator: std.mem.Allocator, size:
     }
 }
 
-fn encodeString(list: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
+pub fn encodeString(list: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
     if (str.len < 32) {
         try list.append(allocator, 0xA0 | @as(u8, @intCast(str.len)));
     } else if (str.len < 256) {

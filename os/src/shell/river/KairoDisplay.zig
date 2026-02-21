@@ -26,7 +26,7 @@ pub fn init(self: *KairoDisplay) !void {
     self.global = try wl.Global.create(
         self.server.wl_server,
         kairo.DisplayV1,
-        1,
+        2,
         *KairoDisplay,
         self,
         bind,
@@ -104,7 +104,7 @@ fn createKairoSurface(
     };
     errdefer allocator.destroy(kairo_surface);
 
-    const resource = kairo.SurfaceV1.create(client, 1, id) catch {
+    const resource = kairo.SurfaceV1.create(client, 2, id) catch {
         client.postNoMemory();
         return;
     };
@@ -120,20 +120,39 @@ fn createKairoSurface(
 }
 
 // ============================================================
-// KairoSurface: 接收 JSON UI 树并渲染到 overlay 层
+// KairoSurface: 接收 JSON UI 树并渲染到指定场景层
 // ============================================================
+
+/// KDP surface 的目标渲染层（与协议 enum 对应）
+const SurfaceLayer = enum(u32) {
+    wm = 0,         // 窗口管理层（参与 WM 布局和层叠）
+    overlay = 1,    // 覆盖层（始终置顶，如启动器）
+    background = 2, // 背景层（壁纸）
+    bottom = 3,     // 底部层（任务栏）
+};
 
 const KairoSurface = struct {
     server: *Server,
     surface_resource: *wl.Surface,
     resource: *kairo.SurfaceV1,
     display: *KairoDisplay,
-    /// overlay 子树，用于管理所有渲染节点的生命周期
+    /// 渲染子树，用于管理所有渲染节点的生命周期
     overlay_tree: ?*wlr.SceneTree = null,
     /// 可交互元素的命中区域列表（用于 user_action 事件）
     hit_regions: std.ArrayList(HitRegion) = .{},
     /// 当前 hover 的元素 ID（用于 hover enter/leave 检测）
     hovered_element_id: ?[]const u8 = null,
+    /// 目标渲染层（默认 wm 层）
+    layer: SurfaceLayer = .overlay, // 向后兼容：未调用 set_layer 的旧客户端保持 overlay
+    /// 窗口标题
+    title: ?[]const u8 = null,
+    /// 几何信息
+    geometry: struct {
+        x: i32 = 0,
+        y: i32 = 0,
+        width: i32 = 0,
+        height: i32 = 0,
+    } = .{},
 
     const HitRegion = struct {
         element_id: []const u8,
@@ -172,6 +191,26 @@ const KairoSurface = struct {
                 }
                 log.info("KDP: Received UI Tree: {s}", .{payload});
                 self.renderUITree(payload);
+            },
+            .set_layer => |args| {
+                self.layer = std.meta.intToEnum(SurfaceLayer, @intFromEnum(args.layer)) catch {
+                    log.warn("KDP: 无效的 layer 值: {}", .{args.layer});
+                    return;
+                };
+                log.info("KDP: set_layer = {}", .{self.layer});
+            },
+            .set_geometry => |args| {
+                self.geometry = .{
+                    .x = args.x,
+                    .y = args.y,
+                    .width = args.width,
+                    .height = args.height,
+                };
+                log.info("KDP: set_geometry = ({},{} {}x{})", .{ args.x, args.y, args.width, args.height });
+            },
+            .set_title => |args| {
+                self.title = std.mem.span(args.title);
+                log.info("KDP: set_title = {s}", .{self.title orelse "(null)"});
             },
             .destroy => {
                 resource.destroy();
@@ -258,21 +297,33 @@ const KairoSurface = struct {
         log.info("KDP: focus_event focused={}", .{focused});
     }
 
-    /// 解析 JSON UI 树并渲染到 overlay 场景层
+    /// 解析 JSON UI 树并渲染到目标场景层
     fn renderUITree(self: *KairoSurface, json_payload: [:0]const u8) void {
-        // 清理旧的 overlay 节点和命中区域
+        // 清理旧的渲染节点和命中区域
         if (self.overlay_tree) |tree| {
             tree.node.destroy();
             self.overlay_tree = null;
         }
         self.hit_regions.clearRetainingCapacity();
 
-        const overlay_parent = self.server.scene.layers.overlay;
-        const tree = overlay_parent.createSceneTree() catch {
-            log.err("KDP: 无法创建 overlay 子树", .{});
+        // 根据 layer 选择目标场景层
+        const parent_layer: *wlr.SceneTree = switch (self.layer) {
+            .wm => self.server.scene.layers.wm,
+            .overlay => self.server.scene.layers.overlay,
+            .background => self.server.scene.layers.background,
+            .bottom => self.server.scene.layers.bottom,
+        };
+
+        const tree = parent_layer.createSceneTree() catch {
+            log.err("KDP: 无法创建场景子树 (layer={})", .{self.layer});
             return;
         };
         self.overlay_tree = tree;
+
+        // 对非 wm 层的 surface，应用几何位置
+        if (self.layer != .wm) {
+            tree.node.setPosition(self.geometry.x, self.geometry.y);
+        }
 
         const parsed = std.json.parseFromSlice(UIElement, std.heap.c_allocator, json_payload, .{
             .ignore_unknown_fields = true,

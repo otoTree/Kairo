@@ -75,7 +75,8 @@ RUN apk add --no-cache \
     eudev \
     seatd \
     freetype \
-    font-dejavu
+    font-dejavu \
+    chromium
 
 # Copy our binaries
 COPY --from=builder /build/zig-out/bin/kairo-init /init

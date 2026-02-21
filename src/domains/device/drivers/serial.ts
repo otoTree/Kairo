@@ -1,4 +1,9 @@
-import { SerialPort } from 'serialport';
+// serialport: 运行时动态导入，避免 bundler 打包原生模块导致编译错误
+let SerialPortClass: any = null;
+try {
+  const mod = 'serialport';
+  SerialPortClass = globalThis.require?.(mod)?.SerialPort ?? require(mod).SerialPort;
+} catch {}
 import { EventEmitter } from 'events';
 import type { IDeviceDriver } from './types';
 
@@ -6,7 +11,7 @@ export class NativeSerialDriver extends EventEmitter implements IDeviceDriver {
   public id: string;
   public type: string = 'serial';
   
-  private port: SerialPort | null = null;
+  private port: any = null;
   private path: string;
 
   constructor(deviceId: string, path: string) {
@@ -19,7 +24,10 @@ export class NativeSerialDriver extends EventEmitter implements IDeviceDriver {
     const baudRate = options?.baudRate || 9600;
     
     return new Promise((resolve, reject) => {
-      this.port = new SerialPort({
+      if (!SerialPortClass) {
+        return reject(new Error('serialport 模块不可用'));
+      }
+      this.port = new SerialPortClass({
         path: this.path,
         baudRate: baudRate,
         autoOpen: false

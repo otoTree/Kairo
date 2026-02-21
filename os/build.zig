@@ -59,7 +59,7 @@ pub fn build(b: *std.Build) void {
     scanner.addCustomProtocol(b.path("src/shell/protocol/river-window-management-v1.xml"));
     scanner.generate("river_window_manager_v1", 1);
     scanner.addCustomProtocol(b.path("src/shell/protocol/kairo-display-v1.xml"));
-    scanner.generate("kairo_display_v1", 1);
+    scanner.generate("kairo_display_v1", 2);
 
     const wayland_module = b.createModule(.{ .root_source_file = scanner.result });
     kairo_wm_exe.root_module.addImport("wayland", wayland_module);

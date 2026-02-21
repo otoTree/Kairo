@@ -5,7 +5,7 @@
     SPDX-License-Identifier: MIT
   </copyright>
 
-  <interface name="kairo_display_v1" version="1">
+  <interface name="kairo_display_v1" version="2">
     <description summary="Kairo Display Protocol Manager">
       The global manager for Kairo Display Protocol.
       It allows clients (Kernel) to create surfaces for rendering UI trees.
@@ -21,7 +21,7 @@
     </request>
   </interface>
 
-  <interface name="kairo_surface_v1" version="1">
+  <interface name="kairo_surface_v1" version="2">
     <description summary="Kairo Surface">
       A surface that renders a JSON-based UI tree.
       The client sends the UI tree as a string, and the compositor renders it.
@@ -82,6 +82,54 @@
         Emitted when this surface gains or loses keyboard focus.
       </description>
       <arg name="focused" type="uint" summary="1=gained focus, 0=lost focus"/>
+    </event>
+
+    <!-- KDP v2 扩展 -->
+
+    <enum name="layer">
+      <description summary="surface 的目标渲染层">
+        控制 KDP surface 在合成器场景图中的渲染层级。
+      </description>
+      <entry name="wm" value="0" summary="窗口管理层（默认，参与 WM 布局和层叠）"/>
+      <entry name="overlay" value="1" summary="覆盖层（始终置顶，如启动器）"/>
+      <entry name="background" value="2" summary="背景层（壁纸）"/>
+      <entry name="bottom" value="3" summary="底部层（任务栏）"/>
+    </enum>
+
+    <request name="set_layer" since="2">
+      <description summary="设置 surface 的目标渲染层">
+        设置此 surface 在合成器场景图中的渲染层。
+        默认为 wm 层，参与窗口管理器的布局和层叠排序。
+        必须在 commit_ui_tree 之前调用才能生效。
+      </description>
+      <arg name="layer" type="uint" enum="layer"/>
+    </request>
+
+    <request name="set_geometry" since="2">
+      <description summary="设置 surface 几何信息">
+        设置此 surface 的位置和尺寸。
+        对于 wm 层的 surface，位置由窗口管理器通过 river_node_v1 控制，
+        此请求仅用于通知合成器 surface 的逻辑尺寸。
+        对于其他层（background/bottom/overlay），位置和尺寸直接生效。
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <request name="set_title" since="2">
+      <description summary="设置窗口标题">
+        设置此 surface 的标题，用于任务栏显示和窗口管理。
+      </description>
+      <arg name="title" type="string"/>
+    </request>
+
+    <event name="request_close" since="2">
+      <description summary="合成器请求关闭窗口">
+        合成器或窗口管理器请求客户端关闭此 surface。
+        客户端应在处理完毕后调用 destroy 请求。
+      </description>
     </event>
   </interface>
 </protocol>
