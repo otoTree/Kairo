@@ -1,192 +1,163 @@
 import type { Plugin } from "../../core/plugin";
 import type { Application } from "../../core/app";
-import { MemCube } from "./memcube";
-import { AIPlugin } from "../ai/ai.plugin";
+import type { AIPlugin } from "../ai/ai.plugin";
 import type { AgentPlugin } from "../agent/agent.plugin";
-
-import path from "path";
-
+import { MemoryStore } from "./memory-store";
 import { MemoryLayer } from "./types";
+import path from "path";
 
 export class MemoryPlugin implements Plugin {
   readonly name = "memory";
-  private memCube?: MemCube;
-  private embeddingProviderName?: string;
+  private store?: MemoryStore;
   private app?: Application;
   private storagePath?: string;
 
-  constructor(embeddingProviderName?: string, storagePath?: string) {
-    this.embeddingProviderName = embeddingProviderName;
+  constructor(storagePath?: string) {
     this.storagePath = storagePath;
   }
 
   async setup(app: Application) {
     this.app = app;
-    const ai = app.getService<AIPlugin>("ai");
-    if (!ai) {
-      throw new Error("MemoryPlugin requires AIPlugin");
-    }
-    // Default storage path: /data/memcube relative to CWD
-    const finalStoragePath = this.storagePath || path.join(process.cwd(), "data", "memcube");
-    
-    this.memCube = new MemCube(ai, this.embeddingProviderName, finalStoragePath);
-    await this.memCube.init(); // Initialize storage
-    
-    app.registerService("memCube", this.memCube);
-    console.log(`[Memory] MemCube service registered (Provider: ${this.embeddingProviderName || "default"}, Path: ${finalStoragePath}).`);
+    const finalPath = this.storagePath || path.join(process.cwd(), "data", "memory");
+
+    // AIPlugin 可选，用于 consolidate
+    let ai: AIPlugin | undefined;
+    try { ai = app.getService<AIPlugin>("ai"); } catch {}
+
+    this.store = new MemoryStore(finalPath, ai);
+    await this.store.init();
+
+    app.registerService("memoryStore", this.store);
+    console.log(`[Memory] MemoryStore initialized at ${finalPath}`);
   }
 
   start() {
-    console.log("[Memory] Memory domain active.");
-    
-    // Register tools
     const agent = this.app?.getService<AgentPlugin>("agent");
     if (agent) {
-        this.registerTools(agent);
+      this.registerTools(agent);
     } else {
-        console.warn("[Memory] AgentPlugin not found. Tools not registered.");
+      console.warn("[Memory] AgentPlugin not found.");
     }
   }
 
   private registerTools(agent: AgentPlugin) {
-      if (!this.memCube) return;
+    if (!this.store) return;
 
-      agent.registerSystemTool({
-          name: "memory_add",
-          description: "Add a new memory entry to MemCube.",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  content: { type: "string", description: "The content to memorize" },
-                  namespace: { type: "string", description: "命名空间，用于多 Agent 隔离（默认 default）" },
-                  layer: { type: "string", enum: ["L1", "L2", "L3"], description: "Memory Layer (L1: Working, L2: Episodic, L3: Semantic). Default: L2" },
-                  importance: { type: "number", description: "Importance (1-10)" },
-                  metadata: { type: "object", description: "Optional metadata", additionalProperties: true }
-              },
-              required: ["content"]
-          }
-      }, async (args) => {
-          const id = await this.memCube!.add(args.content, {
-              namespace: args.namespace,
-              layer: args.layer as MemoryLayer,
-              attributes: args.importance ? { importance: args.importance } : undefined,
-              metadata: args.metadata
-          });
-          return { id, status: "success" };
+    // memory_add — 添加记忆（可指定层级和重要性）
+    agent.registerSystemTool({
+      name: "memory_add",
+      description: "记住一条信息。importance ≥ 8 的情景记忆会自动晋升为闪光灯记忆。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "要记住的内容" },
+          namespace: { type: "string", description: "命名空间（默认 default）" },
+          layer: {
+            type: "string",
+            enum: Object.values(MemoryLayer),
+            description: "记忆层级：working(短期), episodic(经历), semantic(知识), flashbulb(核心时刻)"
+          },
+          importance: { type: "number", description: "重要性 1-10（默认 5）" },
+          tags: { type: "array", items: { type: "string" }, description: "标签" }
+        },
+        required: ["content"]
+      }
+    }, async (args: any) => {
+      const id = await this.store!.add(args.content, {
+        namespace: args.namespace,
+        layer: args.layer as MemoryLayer,
+        importance: args.importance,
+        tags: args.tags,
       });
+      return { id, status: "success" };
+    });
 
-      agent.registerSystemTool({
-          name: "memory_recall",
-          description: "Recall memories using hybrid retrieval (Vector + Keyword).",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  query: { type: "string", description: "Search query" },
-                  namespace: { type: "string", description: "限定命名空间" },
-                  limit: { type: "number", description: "Max number of results (default 5)" },
-                  threshold: { type: "number", description: "Similarity threshold (0-1, default 0.0)" },
-                  layer: { type: "array", items: { type: "string", enum: ["L1", "L2", "L3"] }, description: "Filter by layers" },
-                  minImportance: { type: "number", description: "Filter by minimum importance" },
-                  before: { type: "number", description: "Time Travel: Only memories created before timestamp" },
-                  after: { type: "number", description: "Only memories created after timestamp" }
-              },
-              required: ["query"]
-          }
-      }, async (args) => {
-          const entries = await this.memCube!.recall({
-              text: args.query,
-              namespace: args.namespace,
-              limit: args.limit,
-              threshold: args.threshold,
-              filter: {
-                  layer: args.layer as MemoryLayer[],
-                  minImportance: args.minImportance,
-                  before: args.before,
-                  after: args.after
-              }
-          });
-          return { entries };
-      });
-    
-          agent.registerSystemTool({
-              name: "memory_consolidate",
-              description: "Trigger manual consolidation of memories.",
-              inputSchema: {
-                  type: "object",
-                  properties: {
-                      batchSize: { type: "number", description: "Number of memories to consolidate" }
-                  }
-              }
-          }, async (args) => {
-              const summaryIds = await this.memCube!.consolidate({ batchSize: args.batchSize });
-              return { status: "success", summaryIds };
-          });
-    
-          agent.registerSystemTool({
-              name: "memory_reinforce",
-          description: "Reinforce a memory (adjust importance/strength) based on feedback.",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  id: { type: "string", description: "Memory ID" },
-                  feedback: { type: "string", enum: ["positive", "negative", "access"], description: "Feedback type" }
-              },
-              required: ["id", "feedback"]
-          }
-      }, async (args) => {
-          await this.memCube!.reinforce(args.id, args.feedback as any);
-          return { status: "success" };
-      });
+    // memory_recall — 关键词搜索（跨层级，importance 加权）
+    agent.registerSystemTool({
+      name: "memory_recall",
+      description: "通过关键词搜索记忆，支持按层级和重要性过滤。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "搜索关键词" },
+          namespace: { type: "string", description: "命名空间" },
+          layer: { type: "string", enum: Object.values(MemoryLayer), description: "限定层级" },
+          minImportance: { type: "number", description: "最低重要性" },
+          tags: { type: "array", items: { type: "string" }, description: "限定标签" },
+          limit: { type: "number", description: "最大返回数量（默认 10）" }
+        },
+        required: ["query"]
+      }
+    }, async (args: any) => {
+      const results = await this.store!.recall({
+        text: args.query,
+        layer: args.layer as MemoryLayer,
+        minImportance: args.minImportance,
+        tags: args.tags,
+        limit: args.limit,
+      }, args.namespace);
+      const items = results as any[];
+      return {
+        results: items.map((r: any) => ({
+          id: r.entry.id, content: r.entry.content,
+          layer: r.entry.layer, importance: r.entry.importance, score: r.score
+        }))
+      };
+    });
 
-      // 跨命名空间共享记忆
-      agent.registerSystemTool({
-          name: "memory_share",
-          description: "跨命名空间共享记忆",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  fromNamespace: { type: "string", description: "源命名空间" },
-                  toNamespace: { type: "string", description: "目标命名空间" },
-                  memoryId: { type: "string", description: "记忆 ID" }
-              },
-              required: ["fromNamespace", "toNamespace", "memoryId"]
-          }
-      }, async (args) => {
-          const newId = await this.memCube!.share(args.fromNamespace, args.toNamespace, args.memoryId);
-          return { newId, status: "success" };
-      });
+    // memory_forget — 删除记忆
+    agent.registerSystemTool({
+      name: "memory_forget",
+      description: "删除一条记忆。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "记忆 ID" },
+          namespace: { type: "string", description: "命名空间" }
+        },
+        required: ["id"]
+      }
+    }, async (args: any) => {
+      const deleted = await this.store!.forget(args.id, args.namespace);
+      return { deleted, status: deleted ? "success" : "not_found" };
+    });
 
-      // 导出记忆
-      agent.registerSystemTool({
-          name: "memory_export",
-          description: "导出记忆为 JSON 格式",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  namespace: { type: "string", description: "限定命名空间（可选）" }
-              }
-          }
-      }, async (args) => {
-          const data = await this.memCube!.exportMemories(args.namespace);
-          return { data };
-      });
+    // memory_list — 列出记忆
+    agent.registerSystemTool({
+      name: "memory_list",
+      description: "列出记忆条目，可按层级过滤。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          namespace: { type: "string", description: "命名空间" },
+          layer: { type: "string", enum: Object.values(MemoryLayer), description: "限定层级" }
+        }
+      }
+    }, async (args: any) => {
+      const entries = await this.store!.list(args.namespace, args.layer as MemoryLayer);
+      return {
+        entries: entries.map(e => ({
+          id: e.id, content: e.content, layer: e.layer,
+          importance: e.importance, tags: e.tags
+        }))
+      };
+    });
 
-      // 导入记忆
-      agent.registerSystemTool({
-          name: "memory_import",
-          description: "从 JSON 数据导入记忆",
-          inputSchema: {
-              type: "object",
-              properties: {
-                  data: { type: "string", description: "JSON 格式的记忆数据" }
-              },
-              required: ["data"]
-          }
-      }, async (args) => {
-          const count = await this.memCube!.importMemories(args.data);
-          return { count, status: "success" };
-      });
-      
-      console.log("[Memory] Registered Memory Tools");
+    // memory_consolidate — 将 L2 情景记忆固化为 L3 语义摘要
+    agent.registerSystemTool({
+      name: "memory_consolidate",
+      description: "将情景记忆（L2）聚合固化为语义记忆（L3）摘要。需要 AI 生成摘要。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          namespace: { type: "string", description: "命名空间" }
+        }
+      }
+    }, async (args: any) => {
+      const summaryIds = await this.store!.consolidate(args.namespace);
+      return { status: "success", summaryIds };
+    });
+
+    console.log("[Memory] Registered Memory Tools (bionic layers)");
   }
 }

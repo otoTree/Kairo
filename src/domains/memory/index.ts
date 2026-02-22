@@ -1,3 +1,3 @@
 export * from "./types";
-export * from "./memcube";
+export * from "./memory-store";
 export * from "./memory.plugin";

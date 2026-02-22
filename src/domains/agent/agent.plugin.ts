@@ -8,7 +8,7 @@ import { InMemorySharedMemory, type SharedMemory } from "./shared-memory";
 import { AgentRuntime, type SystemTool } from "./runtime";
 import { InMemoryGlobalBus, RingBufferEventStore, type EventBus, type KairoEvent } from "../events";
 import type { Vault } from "../vault/vault";
-import type { MemCube } from "../memory/memcube";
+import type { MemoryStore } from "../memory/memory-store";
 import { CapabilityRegistry, type AgentCapability } from "./capability-registry";
 
 export class AgentPlugin implements Plugin {
@@ -32,7 +32,7 @@ export class AgentPlugin implements Plugin {
   private ai?: AIPlugin;
   private mcp?: MCPPlugin;
   private vault?: Vault;
-  private memCube?: MemCube;
+  private memoryStore?: MemoryStore;
   private systemTools: SystemTool[] = [];
 
   constructor() {
@@ -109,15 +109,15 @@ export class AgentPlugin implements Plugin {
     }
 
     try {
-        this.memCube = this.app.getService<MemCube>("memCube");
+        this.memoryStore = this.app.getService<MemoryStore>("memoryStore");
     } catch (e) {
-        console.warn("[Agent] MemCube service not found.");
+        console.warn("[Agent] MemoryStore service not found.");
     }
 
     // Spawn default agent
-    // If MemCube is available, inject it into the default memory
-    if (this.memCube && this.memory instanceof InMemoryAgentMemory) {
-        this.memory.setLongTermMemory(this.memCube);
+    // If MemoryStore is available, inject it into the default memory
+    if (this.memoryStore && this.memory instanceof InMemoryAgentMemory) {
+        this.memory.setLongTermMemory(this.memoryStore);
     }
 
     this.spawnAgent("default", this.memory);
@@ -210,8 +210,8 @@ export class AgentPlugin implements Plugin {
       if (this.agents.has(id)) return this.agents.get(id)!;
       
       const agentMemory = memory || new InMemoryAgentMemory();
-      if (this.memCube && agentMemory instanceof InMemoryAgentMemory) {
-          agentMemory.setLongTermMemory(this.memCube);
+      if (this.memoryStore && agentMemory instanceof InMemoryAgentMemory) {
+          agentMemory.setLongTermMemory(this.memoryStore);
       }
 
       const runtime = new AgentRuntime({

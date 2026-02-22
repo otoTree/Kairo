@@ -74,9 +74,8 @@ async function bootstrap() {
 
     await app.use(new AIPlugin(providers));
 
-    // Setup Memory (Depends on AI)
-    // If separate embedding provider exists, use it; otherwise use default
-    await app.use(new MemoryPlugin(embeddingBaseUrl ? "openai-embedding" : undefined));
+    // Setup Memory (Markdown-based, no AI dependency for basic ops)
+    await app.use(new MemoryPlugin());
 
     // Setup Vault
     await app.use(new VaultPlugin());
