@@ -23,31 +23,27 @@ export interface AppEntry {
 /** 预装应用列表 */
 export const PREINSTALLED_APPS: AppEntry[] = [
   {
-    id: "brand",
-    name: "Kairo",
-    icon: "<>",
-    type: "kdp",
-    category: "系统",
-  },
-  {
     id: "terminal",
     name: "终端",
     icon: ">_",
-    type: "kdp",
+    type: "native",
+    command: "foot",
     category: "系统",
   },
   {
     id: "files",
     name: "文件",
     icon: "[]",
-    type: "kdp",
+    type: "native",
+    command: "thunar",
     category: "系统",
   },
   {
-    id: "chrome",
-    name: "Chrome",
-    icon: "@",
-    type: "kdp",
+    id: "chromium",
+    name: "Chromium",
+    icon: "○",
+    type: "native",
+    command: "chromium-browser --no-sandbox --ozone-platform=wayland --enable-features=UseOzonePlatform",
     category: "应用",
   },
   {

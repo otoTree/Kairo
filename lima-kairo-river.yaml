@@ -34,6 +34,11 @@ provision:
     #!/bin/sh
     set -eux
 
+    # 使用宿主机 Clash 代理加速下载
+    export http_proxy="http://192.168.5.2:7897"
+    export https_proxy="http://192.168.5.2:7897"
+    export no_proxy="localhost,127.0.0.1"
+
     # 启用 edge 仓库 (wlroots 等包在 edge/community)
     cat > /etc/apk/repositories << 'EOF'
     https://dl-cdn.alpinelinux.org/alpine/edge/main
@@ -64,6 +69,18 @@ provision:
 
     # 浏览器
     apk add --no-cache chromium
+
+    # 桌面 Shell 组件（替代 KDP Shell）
+    apk add --no-cache waybar swaybg fuzzel
+
+    # 文件管理器 (GTK3, 轻量)
+    apk add --no-cache thunar
+
+    # GTK 主题 + 图标
+    apk add --no-cache adwaita-icon-theme
+
+    # 字体增强（CJK 支持）
+    apk add --no-cache font-noto font-noto-cjk
 
     # 基础工具
     apk add --no-cache bash shadow sudo

@@ -25,6 +25,10 @@ const Window = struct {
     maximized: bool = false,
     /// 是否已最小化（隐藏）
     minimized: bool = false,
+    /// 是否已完成初始尺寸设置（浮动模式下只设置一次）
+    initial_sized: bool = false,
+    /// 是否已完成初始定位
+    initial_positioned: bool = false,
 };
 
 /// KDP 窗口（通过 river_shell_surface 参与 WM 布局）
@@ -65,6 +69,7 @@ const Context = struct {
     compositor_global: ?*wl.Compositor,
     shm_global: ?*wl.Shm,
     kairo_display: ?*kairo.DisplayV1,
+    layer_shell: ?*river.LayerShellV1,
 
     windows: std.ArrayList(*Window),
     kdp_windows: std.ArrayList(*KdpWindow),
@@ -105,6 +110,18 @@ fn windowListener(window: *river.WindowV1, event: river.WindowV1.Event, ctx: *Wi
         .decoration_hint => |ev| {
             ctx.decoration_hint = @intCast(@intFromEnum(ev.hint));
             std.debug.print("WM: window decoration_hint = {}\n", .{ev.hint});
+        },
+        .maximize_requested => {
+            // 用户点击了 SSD 最大化按钮 → 切换最大化状态
+            ctx.maximized = true;
+            std.debug.print("WM: maximize_requested\n", .{});
+        },
+        .unmaximize_requested => {
+            // 用户点击了 SSD 还原按钮 → 取消最大化
+            ctx.maximized = false;
+            // 重置初始定位标记，以便还原时重新计算位置
+            ctx.initial_positioned = false;
+            std.debug.print("WM: unmaximize_requested\n", .{});
         },
         .closed => {},
         else => {},
@@ -270,7 +287,7 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
                 ctx.pending_focus = null;
             }
 
-            // 3.1: 对 xdg 窗口请求 SSD 装饰
+            // 3.1: 对 xdg 窗口请求 SSD 装饰 + 声明支持的能力
             for (ctx.windows.items) |win| {
                 if (!win.ssd_requested) {
                     // 仅对支持 SSD 的窗口请求（decoration_hint != 0 即 only_supports_csd）
@@ -278,6 +295,9 @@ fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ct
                         win.river_window.useSsd();
                         std.debug.print("WM: requested SSD for xdg window\n", .{});
                     }
+                    // 告知窗口 WM 支持最大化/最小化/全屏能力
+                    const caps = river.WindowV1.Capabilities{ .maximize = true, .fullscreen = true, .minimize = true, .window_menu = true };
+                    win.river_window.setCapabilities(caps);
                     win.ssd_requested = true;
                 }
             }
@@ -347,7 +367,13 @@ fn totalWindowCount(ctx: *Context) usize {
     return count;
 }
 
-/// Manage sequence: 为 xdg 窗口提议尺寸
+/// 浮动窗口默认尺寸（屏幕的 60%）
+const FLOAT_WIDTH_RATIO: i32 = 60;
+const FLOAT_HEIGHT_RATIO: i32 = 70;
+/// 级联偏移量
+const CASCADE_OFFSET: i32 = 30;
+
+/// Manage sequence: 为 xdg 窗口提议尺寸（浮动模式）
 fn proposeDimensions(ctx: *Context) void {
     if (ctx.outputs.items.len == 0) return;
     const output = ctx.outputs.items[0];
@@ -355,27 +381,20 @@ fn proposeDimensions(ctx: *Context) void {
     const width = output.width;
     const height = output.height;
 
-    const total = totalWindowCount(ctx);
-    if (total == 0) return;
-
     const pad: i32 = 10;
-
-    var available_width = width;
-    if (ctx.agent_active) {
-        available_width = @divFloor(width * 70, 100);
-    }
-
-    const effective_width = available_width - (2 * pad);
+    const effective_width = width - (2 * pad);
     const effective_height = height - PANEL_HEIGHT - (2 * pad);
 
-    // xdg 窗口参与 proposeDimensions
+    // 浮动窗口默认尺寸
+    const float_w = @divFloor(effective_width * FLOAT_WIDTH_RATIO, 100);
+    const float_h = @divFloor(effective_height * FLOAT_HEIGHT_RATIO, 100);
+
     var visible_xdg: usize = 0;
     for (ctx.windows.items) |win| {
         if (!win.minimized) visible_xdg += 1;
     }
-    if (visible_xdg == 0) return; // KDP 窗口不需要 proposeDimensions
+    if (visible_xdg == 0) return;
 
-    // 5.1: 最大化窗口占满可用区域
     for (ctx.windows.items) |win| {
         if (win.minimized) {
             win.river_window.hide();
@@ -386,107 +405,78 @@ fn proposeDimensions(ctx: *Context) void {
             win.river_window.informMaximized();
             continue;
         }
-    }
-
-    // 非最大化窗口走正常布局
-    if (total == 1 and visible_xdg == 1) {
-        for (ctx.windows.items) |win| {
-            if (!win.minimized and !win.maximized) {
-                win.river_window.proposeDimensions(effective_width, effective_height);
-            }
+        // 从最大化还原时：通知窗口已取消最大化，重新提议浮动尺寸
+        if (win.initial_sized and !win.maximized) {
+            // 每次 manage 序列都通知 unmaximized 状态（幂等操作）
+            win.river_window.informUnmaximized();
         }
-    } else {
-        const master_width = @divFloor(effective_width, 2) - @divFloor(pad, 2);
-        const stack_width = effective_width - master_width - pad;
-        const stack_count: i32 = @intCast(@max(1, total - 1));
-        const stack_height = @divFloor(effective_height, stack_count) - pad;
-
-        var idx: usize = 0;
-        for (ctx.windows.items) |win| {
-            if (win.minimized or win.maximized) continue;
-            if (idx == 0) {
-                win.river_window.proposeDimensions(master_width, effective_height);
-            } else {
-                win.river_window.proposeDimensions(stack_width, stack_height);
-            }
-            idx += 1;
+        // 浮动模式：只对新窗口提议初始尺寸，之后不再干预
+        if (!win.initial_sized) {
+            win.river_window.proposeDimensions(float_w, float_h);
+            win.initial_sized = true;
         }
     }
 
-    std.debug.print("WM: proposed dimensions for {} xdg windows (total: {})\n", .{ visible_xdg, total });
+    std.debug.print("WM: proposed dimensions for {} xdg windows (floating)\n", .{visible_xdg});
 }
 
-/// Render sequence: 定位所有窗口节点（xdg + KDP）
+/// Render sequence: 定位所有窗口节点（浮动级联模式）
 fn positionWindows(ctx: *Context) void {
     if (ctx.outputs.items.len == 0) return;
     const output = ctx.outputs.items[0];
 
     const width = output.width;
+    const height = output.height;
     const total = totalWindowCount(ctx);
     if (total == 0) return;
 
     const pad: i32 = 10;
+    const effective_width = width - (2 * pad);
+    const effective_height = height - PANEL_HEIGHT - (2 * pad);
 
-    var available_width = width;
-    if (ctx.agent_active) {
-        available_width = @divFloor(width * 70, 100);
-    }
-
-    const effective_width = available_width - (2 * pad);
-    const effective_height = output.height - PANEL_HEIGHT - (2 * pad);
-
-    // 5.1: 最大化窗口占满可用区域
+    // 最大化窗口占满可用区域（xdg + KDP）
     for (ctx.windows.items) |win| {
         if (win.maximized and !win.minimized) {
             if (win.node) |n| n.setPosition(pad, pad);
         }
     }
-
-    // 收集可见且非最大化的窗口统一定位
-    if (total == 1) {
-        // 单窗口全屏
-        for (ctx.windows.items) |win| {
-            if (!win.minimized and !win.maximized) {
-                if (win.node) |n| n.setPosition(pad, pad);
-            }
-        }
-        for (ctx.kdp_windows.items) |kdp_win| {
-            if (!kdp_win.minimized) {
-                if (kdp_win.node) |n| n.setPosition(pad, pad);
-            }
-        }
-    } else {
-        const master_width = @divFloor(effective_width, 2) - @divFloor(pad, 2);
-        const stack_count: i32 = @intCast(@max(1, total - 1));
-        const stack_height = @divFloor(effective_height, stack_count) - pad;
-
-        // 统一定位：第一个可见窗口为 master，其余为 stack
-        var idx: usize = 0;
-
-        for (ctx.windows.items) |win| {
-            if (win.minimized or win.maximized) continue;
-            if (idx == 0) {
-                if (win.node) |n| n.setPosition(pad, pad);
-            } else {
-                const y_offset = pad + @as(i32, @intCast(idx - 1)) * (stack_height + pad);
-                if (win.node) |n| n.setPosition(pad + master_width + pad, y_offset);
-            }
-            idx += 1;
-        }
-
-        for (ctx.kdp_windows.items) |kdp_win| {
-            if (kdp_win.minimized) continue;
-            if (idx == 0) {
-                if (kdp_win.node) |n| n.setPosition(pad, pad);
-            } else {
-                const y_offset = pad + @as(i32, @intCast(idx - 1)) * (stack_height + pad);
-                if (kdp_win.node) |n| n.setPosition(pad + master_width + pad, y_offset);
-            }
-            idx += 1;
+    for (ctx.kdp_windows.items) |kdp_win| {
+        if (kdp_win.maximized and !kdp_win.minimized) {
+            if (kdp_win.node) |n| n.setPosition(pad, pad);
         }
     }
 
-    std.debug.print("WM: positioned {} windows\n", .{total});
+    // 浮动级联：每个窗口偏移 CASCADE_OFFSET
+    // 起始位置居中偏左上
+    const float_w = @divFloor(effective_width * FLOAT_WIDTH_RATIO, 100);
+    const float_h = @divFloor(effective_height * FLOAT_HEIGHT_RATIO, 100);
+    const start_x = @divFloor(effective_width - float_w, 2) + pad;
+    const start_y = @divFloor(effective_height - float_h, 2) + pad;
+
+    var idx: usize = 0;
+
+    for (ctx.windows.items) |win| {
+        if (win.minimized or win.maximized) continue;
+        if (!win.initial_positioned) {
+            const offset: i32 = @intCast(idx * @as(usize, @intCast(CASCADE_OFFSET)));
+            const x = start_x + @rem(offset, effective_width - float_w);
+            const y = start_y + @rem(offset, effective_height - float_h);
+            if (win.node) |n| n.setPosition(x, y);
+            win.initial_positioned = true;
+        }
+        idx += 1;
+    }
+
+    for (ctx.kdp_windows.items) |kdp_win| {
+        if (kdp_win.minimized or kdp_win.maximized) continue;
+        const offset: i32 = @intCast(idx * @as(usize, @intCast(CASCADE_OFFSET)));
+        const x = start_x + @rem(offset, effective_width - float_w);
+        const y = start_y + @rem(offset, effective_height - float_h);
+        if (kdp_win.node) |n| n.setPosition(x, y);
+        idx += 1;
+    }
+
+    std.debug.print("WM: positioned {} windows (floating)\n", .{total});
 }
 
 /// 通过 IPC 通知内核当前窗口列表（供面板更新）
@@ -571,6 +561,25 @@ fn applyFocusByIndex(ctx: *Context, index: usize) void {
 /// 5.1: 最大化/还原窗口
 fn toggleMaximize(ctx: *Context) void {
     if (ctx.focused == null) return;
+    switch (ctx.focused.?) {
+        .window => |w| {
+            for (ctx.windows.items) |win| {
+                if (win.river_window == w) {
+                    win.maximized = !win.maximized;
+                    if (!win.maximized) win.initial_positioned = false;
+                    break;
+                }
+            }
+        },
+        .shell_surface => |ss| {
+            for (ctx.kdp_windows.items) |kdp_win| {
+                if (kdp_win.shell_surface == ss) {
+                    kdp_win.maximized = !kdp_win.maximized;
+                    break;
+                }
+            }
+        },
+    }
     // 触发重新布局
     if (ctx.wm_global) |wm| wm.manageDirty();
     std.debug.print("WM: toggle maximize\n", .{});
@@ -694,6 +703,16 @@ fn encodeUint32(list: *std.ArrayList(u8), allocator: std.mem.Allocator, val: u32
     }
 }
 
+/// 启动原生应用进程（fire-and-forget）
+fn spawnNativeApp(allocator: std.mem.Allocator, argv: []const []const u8) void {
+    var child = std.process.Child.init(argv, allocator);
+    child.spawn() catch |err| {
+        std.debug.print("WM: 启动原生应用失败: {}\n", .{err});
+        return;
+    };
+    std.debug.print("WM: 已启动原生应用 (pid={})\n", .{child.id});
+}
+
 /// 处理来自内核的 IPC 命令
 fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
     if (packet.type != .EVENT and packet.type != .REQUEST) return;
@@ -765,6 +784,7 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
                     for (ctx.windows.items) |win| {
                         if (win.river_window == w) {
                             win.maximized = !win.maximized;
+                            if (!win.maximized) win.initial_positioned = false;
                             break;
                         }
                     }
@@ -832,38 +852,15 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
         const app_id = payload[app_id_start..app_id_end];
         std.debug.print("WM: launch_app exact id='{s}'\n", .{app_id});
 
-        if (std.mem.eql(u8, app_id, "chrome")) {
-            const chrome_json =
-                \\{"type":"root","children":[
-                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":900,"height":36,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Chrome - Google",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"rect","id":"btn_close","x":872,"y":10,"width":16,"height":16,
-                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
-                \\  {"type":"rect","id":"toolbar-bg","x":0,"y":36,"width":900,"height":36,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"btn-back","x":12,"y":46,"text":"<",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
-                \\  {"type":"text","id":"btn-forward","x":32,"y":46,"text":">",
-                \\   "color":[0.353,0.353,0.431,0.6],"scale":2},
-                \\  {"type":"input","id":"address-bar","x":76,"y":42,"width":812,"height":24,
-                \\   "value":"https://www.google.com","placeholder":"Enter URL..."},
-                \\  {"type":"rect","id":"content-bg","x":0,"y":72,"width":900,"height":528,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"text","id":"google-logo","x":370,"y":200,"text":"Google",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":4},
-                \\  {"type":"rect","id":"search-box","x":210,"y":260,"width":480,"height":36,
-                \\   "color":[0.118,0.118,0.165,0.92],"radius":16,"border_width":1,
-                \\   "border_color":[0.165,0.165,0.235,0.5]},
-                \\  {"type":"input","id":"search-input","x":230,"y":266,"width":440,"height":24,
-                \\   "placeholder":"Google Search"}
-                \\]}
-            ;
-            createKdpWindow(ctx, "Chrome", chrome_json);
+        // 原生应用：通过子进程启动
+        if (std.mem.eql(u8, app_id, "terminal")) {
+            spawnNativeApp(ctx.allocator, &.{ "foot" });
+        } else if (std.mem.eql(u8, app_id, "files")) {
+            spawnNativeApp(ctx.allocator, &.{ "thunar" });
+        } else if (std.mem.eql(u8, app_id, "chromium") or std.mem.eql(u8, app_id, "chrome")) {
+            spawnNativeApp(ctx.allocator, &.{ "/bin/sh", "-c", "chromium-browser --no-sandbox --ozone-platform=wayland --enable-features=UseOzonePlatform" });
         } else if (std.mem.eql(u8, app_id, "agent")) {
+            // Agent 仍走 KDP 渲染
             const agent_json =
                 \\{"type":"root","children":[
                 \\  {"type":"rect","id":"bg","x":0,"y":0,"width":600,"height":500,
@@ -905,64 +902,6 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
                 \\]}
             ;
             createKdpWindow(ctx, "Agent", agent_json);
-        } else if (std.mem.eql(u8, app_id, "terminal")) {
-            const term_json =
-                \\{"type":"root","children":[
-                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":800,"height":500,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":800,"height":36,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Terminal",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"rect","id":"btn_close","x":772,"y":10,"width":16,"height":16,
-                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
-                \\  {"type":"rect","id":"content","x":0,"y":36,"width":800,"height":436,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"text","id":"prompt","x":12,"y":48,"text":"kairo@localhost:~$",
-                \\   "color":[0.204,0.78,0.349,1.0],"scale":2},
-                \\  {"type":"rect","id":"cursor","x":300,"y":48,"width":16,"height":16,
-                \\   "color":[0.91,0.91,0.93,0.8]},
-                \\  {"type":"rect","id":"statusbar","x":0,"y":472,"width":800,"height":28,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"status_left","x":12,"y":478,"text":"bash",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
-                \\  {"type":"text","id":"status_right","x":740,"y":478,"text":"UTF-8",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
-                \\]}
-            ;
-            createKdpWindow(ctx, "Terminal", term_json);
-        } else if (std.mem.eql(u8, app_id, "files")) {
-            const files_json =
-                \\{"type":"root","children":[
-                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":900,"height":600,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":900,"height":36,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Files - /home",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"rect","id":"btn_close","x":872,"y":10,"width":16,"height":16,
-                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
-                \\  {"type":"rect","id":"sidebar","x":0,"y":36,"width":220,"height":536,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"fav-title","x":12,"y":48,"text":"Favorites",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
-                \\  {"type":"text","id":"fav-home","x":12,"y":64,"text":"Home",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"text","id":"fav-docs","x":12,"y":88,"text":"Documents",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"text","id":"fav-dl","x":12,"y":112,"text":"Downloads",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"rect","id":"content","x":220,"y":36,"width":680,"height":536,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"text","id":"path","x":232,"y":48,"text":"/home",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":2},
-                \\  {"type":"rect","id":"statusbar","x":0,"y":572,"width":900,"height":28,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"status_left","x":12,"y":578,"text":"0 items selected",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
-                \\]}
-            ;
-            createKdpWindow(ctx, "Files", files_json);
         }
         return;
     }
@@ -991,6 +930,10 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, ctx: *Cont
                 const kd = registry.bind(global.name, kairo.DisplayV1, 2) catch return;
                 ctx.kairo_display = kd;
                 std.debug.print("Bound kairo_display_v1 v2\n", .{});
+            } else if (std.mem.eql(u8, iface, std.mem.span(river.LayerShellV1.interface.name))) {
+                const ls = registry.bind(global.name, river.LayerShellV1, 1) catch return;
+                ctx.layer_shell = ls;
+                std.debug.print("Bound river_layer_shell_v1 (layer-shell 支持已启用)\n", .{});
             }
         },
         .global_remove => {},
@@ -1076,6 +1019,7 @@ pub fn main() !void {
         .compositor_global = null,
         .shm_global = null,
         .kairo_display = null,
+        .layer_shell = null,
 
         .windows = .empty,
         .kdp_windows = .empty,
@@ -1130,63 +1074,8 @@ pub fn main() !void {
     if (display.flush() != .SUCCESS) return error.RoundtripFailed;
     std.debug.print("After second roundtrip: windows={}, outputs={}\n", .{ ctx.windows.items.len, ctx.outputs.items.len });
 
-    // 创建壁纸 + 桌面图标（background 层）
-    if (ctx.kairo_display != null and ctx.compositor_global != null and ctx.wm_global != null) {
-        const wallpaper_json =
-            \\{"type":"root","children":[
-            \\  {"type":"rect","id":"wallpaper-base","x":0,"y":0,"width":1280,"height":720,
-            \\   "color":[0.051,0.051,0.071,1.0]},
-            \\  {"type":"rect","id":"wallpaper-glow","x":440,"y":260,"width":400,"height":200,
-            \\   "color":[0.29,0.486,1.0,0.03],"radius":200},
-            \\  {"type":"rect","id":"desktop-icon-terminal","x":24,"y":24,"width":64,"height":64,
-            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:terminal"},
-            \\  {"type":"text","id":"desktop-icon-symbol-terminal","x":40,"y":40,"text":">_",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
-            \\  {"type":"text","id":"desktop-icon-label-terminal","x":28,"y":92,"text":"Terminal",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
-            \\  {"type":"rect","id":"desktop-icon-files","x":24,"y":124,"width":64,"height":64,
-            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:files"},
-            \\  {"type":"text","id":"desktop-icon-symbol-files","x":40,"y":140,"text":"[]",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
-            \\  {"type":"text","id":"desktop-icon-label-files","x":28,"y":192,"text":"Files",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
-            \\  {"type":"rect","id":"desktop-icon-chrome","x":24,"y":224,"width":64,"height":64,
-            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:chrome"},
-            \\  {"type":"text","id":"desktop-icon-symbol-chrome","x":40,"y":240,"text":"@",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
-            \\  {"type":"text","id":"desktop-icon-label-chrome","x":28,"y":292,"text":"Chrome",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
-            \\  {"type":"rect","id":"desktop-icon-agent","x":24,"y":324,"width":64,"height":64,
-            \\   "color":[0.118,0.118,0.165,0.92],"radius":8,"action":"launch:agent"},
-            \\  {"type":"text","id":"desktop-icon-symbol-agent","x":40,"y":340,"text":"*",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":4},
-            \\  {"type":"text","id":"desktop-icon-label-agent","x":28,"y":392,"text":"Agent",
-            \\   "color":[0.91,0.91,0.93,1.0],"scale":1}
-            \\]}
-        ;
-        createKdpWindowWithLayer(&ctx, "Wallpaper", wallpaper_json, .background);
-
-        // 创建任务栏（bottom 层）
-        const panel_json =
-            \\{"type":"root","children":[
-            \\  {"type":"rect","id":"panel-bg","x":0,"y":0,"width":1280,"height":36,
-            \\   "color":[0.086,0.086,0.118,0.95]},
-            \\  {"type":"rect","id":"panel-border-top","x":0,"y":0,"width":1280,"height":1,
-            \\   "color":[0.165,0.165,0.235,0.5]},
-            \\  {"type":"rect","id":"panel-logo-bg","x":8,"y":6,"width":24,"height":24,
-            \\   "color":[0,0,0,0],"action":"launcher_toggle"},
-            \\  {"type":"text","id":"panel-logo","x":12,"y":10,"text":"<>",
-            \\   "color":[0.29,0.486,1.0,1.0],"scale":2},
-            \\  {"type":"rect","id":"panel-agent-dot","x":1200,"y":14,"width":8,"height":8,
-            \\   "color":[0.204,0.78,0.349,1.0],"radius":4},
-            \\  {"type":"text","id":"panel-clock","x":1216,"y":14,"text":"00:00",
-            \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
-            \\]}
-        ;
-        createKdpWindowWithLayer(&ctx, "Panel", panel_json, .bottom);
-    } else {
-        std.debug.print("Skipping KDP (globals not found)\n", .{});
-    }
+    // 壁纸和任务栏已由 swaybg/waybar 原生接管，不再创建 KDP surface
+    // KDP 仅用于 Agent 窗口（通过 desktop.launch_app:agent IPC 命令触发）
 
     const wl_fd = display.getFd();
     var fds: [2]std.posix.pollfd = undefined;

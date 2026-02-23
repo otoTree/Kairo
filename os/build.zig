@@ -58,6 +58,8 @@ pub fn build(b: *std.Build) void {
     scanner.generate("wl_shm", 1);
     scanner.addCustomProtocol(b.path("src/shell/protocol/river-window-management-v1.xml"));
     scanner.generate("river_window_manager_v1", 1);
+    scanner.addCustomProtocol(b.path("src/shell/protocol/river-layer-shell-v1.xml"));
+    scanner.generate("river_layer_shell_v1", 1);
     scanner.addCustomProtocol(b.path("src/shell/protocol/kairo-display-v1.xml"));
     scanner.generate("kairo_display_v1", 2);
 

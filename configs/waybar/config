@@ -1,0 +1,33 @@
+{
+  "layer": "bottom",
+  "position": "bottom",
+  "height": 36,
+  "spacing": 0,
+  "modules-left": ["custom/kairo-logo", "river/tags"],
+  "modules-center": ["river/window"],
+  "modules-right": ["custom/agent-status", "tray", "clock"],
+  "river/tags": {
+    "num-tags": 4
+  },
+  "river/window": {
+    "max-length": 50
+  },
+  "clock": {
+    "format": "{:%m-%d %H:%M}",
+    "tooltip-format": "{:%Y-%m-%d %A}"
+  },
+  "tray": {
+    "spacing": 8
+  },
+  "custom/kairo-logo": {
+    "format": " ◇ Kairo ",
+    "on-click": "fuzzel",
+    "tooltip": false
+  },
+  "custom/agent-status": {
+    "exec": "kairo-agent-status 2>/dev/null || echo 'idle'",
+    "interval": 5,
+    "format": "● {}",
+    "tooltip": false
+  }
+}
