@@ -32,8 +32,6 @@ export class InMemoryAgentMemory implements AgentMemory {
     this.initStorage();
   }
 
-  // ... (keep existing methods)
-
   async recall(query: string): Promise<string[]> {
     if (this.longTermMemory) {
         return this.longTermMemory.recall(query);
