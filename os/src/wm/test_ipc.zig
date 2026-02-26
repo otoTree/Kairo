@@ -17,7 +17,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const ipc_socket_path = "/tmp/kairo-kernel.sock";
+    const ipc_socket_path = "/run/kairo/kernel.sock";
 
     std.debug.print("Connecting to Kernel IPC at {s}...\n", .{ipc_socket_path});
 

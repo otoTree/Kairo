@@ -105,13 +105,24 @@ async function bootstrap() {
     await app.use(new CompositorPlugin());
 
     // Setup Server
-    const server = new ServerPlugin(
-      Number(process.env.PORT || 3000),
-      process.env.KAIRO_TOKEN || (() => {
+    const token = process.env.KAIRO_TOKEN || (() => {
         const generated = require("crypto").randomBytes(32).toString("hex");
         console.warn("[Security] KAIRO_TOKEN 未设置，已自动生成临时密钥。生产环境请通过环境变量配置。");
         return generated;
-      })()
+    })();
+
+    // 将 token 写入文件，供原生应用（如 kairo-agent-ui）读取
+    try {
+      const fs = require("fs");
+      fs.writeFileSync("/run/kairo/ws.token", token, { mode: 0o600 });
+      console.log("[Server] WebSocket token 已写入 /run/kairo/ws.token");
+    } catch (e) {
+      console.warn("[Server] 无法写入 token 文件:", e);
+    }
+
+    const server = new ServerPlugin(
+      Number(process.env.PORT || 3000),
+      token
     );
     await app.use(server);
 

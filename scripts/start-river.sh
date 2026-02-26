@@ -17,6 +17,10 @@ if ! rc-service udev-trigger status >/dev/null 2>&1; then
   sudo rc-service udev-trigger start
 fi
 
+# 创建 Kairo 运行时目录（IPC socket 等）
+sudo mkdir -p /run/kairo
+sudo chmod 0777 /run/kairo
+
 # 环境变量
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-$(id -u)}"
 mkdir -p "$XDG_RUNTIME_DIR"

@@ -8,7 +8,7 @@ export class IPCClient extends EventEmitter {
   private buffer: Buffer = Buffer.alloc(0);
   private responseHandlers = new Map<string, (data: any) => void>();
 
-  constructor(socketPath: string = '/tmp/kairo-kernel.sock') {
+  constructor(socketPath: string = '/run/kairo/kernel.sock') {
     super();
     this.socketPath = socketPath;
   }

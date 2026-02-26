@@ -23,6 +23,22 @@ export interface AppEntry {
 /** 预装应用列表 */
 export const PREINSTALLED_APPS: AppEntry[] = [
   {
+    id: "brand",
+    name: "Kairo",
+    icon: "<>",
+    type: "native",
+    command: "kairo-brand",
+    category: "系统",
+  },
+  {
+    id: "agent",
+    name: "Agent",
+    icon: "*",
+    type: "native",
+    command: "kairo-agent-ui",
+    category: "系统",
+  },
+  {
     id: "terminal",
     name: "终端",
     icon: ">_",
@@ -45,13 +61,6 @@ export const PREINSTALLED_APPS: AppEntry[] = [
     type: "native",
     command: "chromium-browser --no-sandbox --ozone-platform=wayland --enable-features=UseOzonePlatform",
     category: "应用",
-  },
-  {
-    id: "agent",
-    name: "Agent",
-    icon: "*",
-    type: "kdp",
-    category: "系统",
   },
 ];
 

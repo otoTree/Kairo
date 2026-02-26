@@ -33,7 +33,7 @@ export class IPCServer {
     private systemMonitor: SystemMonitor,
     private deviceRegistry: DeviceRegistry,
     private vault?: Vault,
-    socketPath: string = '/tmp/kairo-kernel.sock'
+    socketPath: string = '/run/kairo/kernel.sock'
   ) {
     this.socketPath = socketPath;
     this.setupProcessEvents();

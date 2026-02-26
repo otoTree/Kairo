@@ -856,52 +856,16 @@ fn handleIpcCommand(ctx: *Context, packet: ipc.Client.Packet) void {
         if (std.mem.eql(u8, app_id, "terminal")) {
             spawnNativeApp(ctx.allocator, &.{ "foot" });
         } else if (std.mem.eql(u8, app_id, "files")) {
-            spawnNativeApp(ctx.allocator, &.{ "thunar" });
+            // Thunar 需要 D-Bus session bus，用 dbus-run-session 包裹启动
+            spawnNativeApp(ctx.allocator, &.{ "/bin/sh", "-c", "dbus-run-session -- thunar" });
         } else if (std.mem.eql(u8, app_id, "chromium") or std.mem.eql(u8, app_id, "chrome")) {
             spawnNativeApp(ctx.allocator, &.{ "/bin/sh", "-c", "chromium-browser --no-sandbox --ozone-platform=wayland --enable-features=UseOzonePlatform" });
         } else if (std.mem.eql(u8, app_id, "agent")) {
-            // Agent 仍走 KDP 渲染
-            const agent_json =
-                \\{"type":"root","children":[
-                \\  {"type":"rect","id":"bg","x":0,"y":0,"width":600,"height":500,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"rect","id":"titlebar","x":0,"y":0,"width":600,"height":36,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"title_text","x":12,"y":10,"text":"Kairo Agent",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":2},
-                \\  {"type":"rect","id":"btn_close","x":572,"y":10,"width":16,"height":16,
-                \\   "color":[0.557,0.557,0.604,0.8],"action":"close"},
-                \\  {"type":"rect","id":"msg-area","x":0,"y":36,"width":600,"height":388,
-                \\   "color":[0.051,0.051,0.071,1.0]},
-                \\  {"type":"rect","id":"msg-bubble-0","x":16,"y":48,"width":300,"height":32,
-                \\   "color":[0.118,0.118,0.165,0.92],"radius":8},
-                \\  {"type":"text","id":"msg-text-0","x":28,"y":56,"text":"Hello! I'm Kairo Agent.",
-                \\   "color":[0.239,0.839,0.784,1.0],"scale":2},
-                \\  {"type":"rect","id":"msg-bubble-1","x":16,"y":88,"width":320,"height":32,
-                \\   "color":[0.118,0.118,0.165,0.92],"radius":8},
-                \\  {"type":"text","id":"msg-text-1","x":28,"y":96,"text":"How can I help you today?",
-                \\   "color":[0.239,0.839,0.784,1.0],"scale":2},
-                \\  {"type":"rect","id":"input-divider","x":0,"y":424,"width":600,"height":1,
-                \\   "color":[0.165,0.165,0.235,0.5]},
-                \\  {"type":"rect","id":"input-area","x":0,"y":425,"width":600,"height":47,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"rect","id":"agent-dot","x":12,"y":442,"width":8,"height":8,
-                \\   "color":[0.204,0.78,0.349,1.0],"radius":4},
-                \\  {"type":"input","id":"chat-input","x":28,"y":433,"width":500,"height":28,
-                \\   "placeholder":"Type a message..."},
-                \\  {"type":"rect","id":"btn-send","x":536,"y":433,"width":52,"height":28,
-                \\   "color":[0.29,0.486,1.0,1.0],"radius":4,"action":"send"},
-                \\  {"type":"text","id":"btn-send-text","x":548,"y":439,"text":"Send",
-                \\   "color":[0.91,0.91,0.93,1.0],"scale":1},
-                \\  {"type":"rect","id":"statusbar","x":0,"y":472,"width":600,"height":28,
-                \\   "color":[0.086,0.086,0.118,0.95]},
-                \\  {"type":"text","id":"status_left","x":12,"y":478,"text":"Agent Ready",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1},
-                \\  {"type":"text","id":"status_right","x":504,"y":478,"text":"Kairo v0.1.0",
-                \\   "color":[0.557,0.557,0.604,0.8],"scale":1}
-                \\]}
-            ;
-            createKdpWindow(ctx, "Agent", agent_json);
+            // Agent 原生 Wayland 客户端
+            spawnNativeApp(ctx.allocator, &.{"kairo-agent-ui"});
+        } else if (std.mem.eql(u8, app_id, "brand")) {
+            // 品牌展示原生 Wayland 客户端
+            spawnNativeApp(ctx.allocator, &.{"kairo-brand"});
         }
         return;
     }
@@ -1040,7 +1004,7 @@ pub fn main() !void {
     std.debug.print("Connecting to Wayland display...\n", .{});
 
     // IPC 连接（KCP 协议）
-    const ipc_socket_path = "/tmp/kairo-kernel.sock";
+    const ipc_socket_path = "/run/kairo/kernel.sock";
     var ipc_client_opt: ?ipc.Client = null;
 
     if (ipc.Client.connect(allocator, ipc_socket_path)) |conn| {

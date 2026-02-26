@@ -63,10 +63,81 @@ pub fn build(b: *std.Build) void {
     scanner.addCustomProtocol(b.path("src/shell/protocol/kairo-display-v1.xml"));
     scanner.generate("kairo_display_v1", 2);
 
+    // 原生应用需要的协议（xdg-shell + wl_seat）
+    scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+    scanner.generate("xdg_wm_base", 2);
+    scanner.generate("wl_seat", 7);
+
     const wayland_module = b.createModule(.{ .root_source_file = scanner.result });
     kairo_wm_exe.root_module.addImport("wayland", wayland_module);
 
     b.installArtifact(kairo_wm_exe);
+
+    // === 共享 common 模块 ===
+    const draw_mod = b.createModule(.{ .root_source_file = b.path("src/apps/common/draw.zig") });
+    const colors_mod = b.createModule(.{ .root_source_file = b.path("src/apps/common/colors.zig") });
+    const shm_buffer_mod = b.createModule(.{
+        .root_source_file = b.path("src/apps/common/shm_buffer.zig"),
+        .imports = &.{.{ .name = "wayland", .module = wayland_module }},
+    });
+    const wayland_client_mod = b.createModule(.{
+        .root_source_file = b.path("src/apps/common/wayland_client.zig"),
+        .imports = &.{
+            .{ .name = "wayland", .module = wayland_module },
+            .{ .name = "shm_buffer", .module = shm_buffer_mod },
+        },
+    });
+    const text_render_mod = b.createModule(.{
+        .root_source_file = b.path("src/apps/common/text_render.zig"),
+        .imports = &.{.{ .name = "draw", .module = draw_mod }},
+        .target = target,
+        .link_libc = true,
+    });
+    text_render_mod.linkSystemLibrary("freetype2", .{});
+    const ipc_client_mod = b.createModule(.{ .root_source_file = b.path("src/apps/common/ipc_client.zig") });
+
+    // kairo-brand 品牌展示应用（原生 Wayland 客户端）
+    const kairo_brand_exe = b.addExecutable(.{
+        .name = "kairo-brand",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/apps/brand/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    kairo_brand_exe.linkLibC();
+    kairo_brand_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+    kairo_brand_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
+    kairo_brand_exe.linkSystemLibrary("wayland-client");
+    kairo_brand_exe.linkSystemLibrary("freetype2");
+    kairo_brand_exe.root_module.addImport("wayland", wayland_module);
+    kairo_brand_exe.root_module.addImport("wayland_client", wayland_client_mod);
+    kairo_brand_exe.root_module.addImport("draw", draw_mod);
+    kairo_brand_exe.root_module.addImport("colors", colors_mod);
+    kairo_brand_exe.root_module.addImport("text_render", text_render_mod);
+    kairo_brand_exe.root_module.addImport("ipc_client", ipc_client_mod);
+    b.installArtifact(kairo_brand_exe);
+
+    // kairo-agent-ui Agent 窗口应用（原生 Wayland 客户端）
+    const kairo_agent_exe = b.addExecutable(.{
+        .name = "kairo-agent-ui",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/apps/agent/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    kairo_agent_exe.linkLibC();
+    kairo_agent_exe.addLibraryPath(.{ .cwd_relative = "/usr/lib" });
+    kairo_agent_exe.addLibraryPath(.{ .cwd_relative = "/lib" });
+    kairo_agent_exe.linkSystemLibrary("wayland-client");
+    kairo_agent_exe.linkSystemLibrary("freetype2");
+    kairo_agent_exe.root_module.addImport("wayland", wayland_module);
+    kairo_agent_exe.root_module.addImport("wayland_client", wayland_client_mod);
+    kairo_agent_exe.root_module.addImport("draw", draw_mod);
+    kairo_agent_exe.root_module.addImport("colors", colors_mod);
+    kairo_agent_exe.root_module.addImport("text_render", text_render_mod);
+    b.installArtifact(kairo_agent_exe);
 
     // Run step (for local testing, though this usually fails on Mac for Linux binaries without QEMU)
     const run_cmd = b.addRunArtifact(exe);

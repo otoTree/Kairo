@@ -99,9 +99,9 @@ const service_defs = [_]ServiceDef{
     },
     .{
         .name = "kairo-kernel",
-        .argv = &[_][*:0]const u8{ "/usr/local/bin/bun", "run", "/usr/lib/kairo/src/index.ts" },
+        .argv = &[_][*:0]const u8{"/usr/local/bin/kairo-kernel"},
         .deps = &[_][]const u8{"dbus"},
-        .health_file = "/tmp/kairo-kernel.sock",
+        .health_file = "/run/kairo/kernel.sock",
     },
     .{
         .name = "river",

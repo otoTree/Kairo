@@ -55,7 +55,7 @@ export class BinaryRunner {
         KAIRO_SKILL_NAME: skillName,
         KAIRO_RUNTIME_TOKEN: runtimeToken,
         KAIRO_BINARY_HASH: binaryHash,
-        KAIRO_IPC_SOCKET: env.KAIRO_IPC_SOCKET || '/tmp/kairo-kernel.sock',
+        KAIRO_IPC_SOCKET: env.KAIRO_IPC_SOCKET || '/run/kairo/kernel.sock',
         ...(context?.correlationId ? { KAIRO_CORRELATION_ID: context.correlationId } : {}),
         ...(context?.causationId ? { KAIRO_CAUSATION_ID: context.causationId } : {}),
       },

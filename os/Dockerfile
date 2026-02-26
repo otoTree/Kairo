@@ -1,4 +1,4 @@
-# Stage 1: Build the Kairo OS Components
+# Stage 1: Build the Kairo OS Components (Zig)
 FROM alpine:edge AS builder
 
 # Install build dependencies
@@ -21,47 +21,15 @@ RUN apk add --no-cache \
 WORKDIR /build
 COPY . .
 
-# Build binaries for Linux (musl)
-# We use --sysroot / to ensure system libraries in /usr/lib are found.
-# We remove -Dtarget=x86_64-linux-musl to rely on native host detection (which is x86_64-linux-musl on Alpine)
-# or we can keep it but must ensure sysroot is correct.
-# Zig's cross-compilation usually ignores host paths, so we MUST specify --sysroot /.
 RUN zig build -Doptimize=ReleaseSmall --sysroot /
 
-# Stage 2: Create the RootFS with runtime dependencies
-FROM alpine:edge AS rootfs
+# Stage 2: Compile kairo-kernel from bundled JS (Bun native compile)
+FROM oven/bun:alpine AS bun-builder
+COPY dist/kairo-kernel-bundle.js /tmp/kairo-kernel-bundle.js
+RUN bun build --compile /tmp/kairo-kernel-bundle.js --outfile /tmp/kairo-kernel
 
-# Install runtime dependencies matching build dependencies
-RUN apk add --no-cache \
-    openrc \
-    util-linux \
-    wayland \
-    wlroots \
-    libinput \
-    libevdev \
-    libxkbcommon \
-    pixman \
-    mesa-dri-gallium \
-    eudev \
-    seatd \
-    freetype \
-    font-dejavu
-
-# Setup basic directories
-RUN mkdir -p /os/bin /os/dev /os/proc /os/sys /os/tmp /os/etc/init.d /os/usr/bin /os/usr/share
-
-# Copy artifacts from builder
-COPY --from=builder /build/zig-out/bin/kairo-init /os/init
-COPY --from=builder /build/zig-out/bin/river /os/usr/bin/river
-COPY --from=builder /build/zig-out/bin/kairo-wm /os/usr/bin/kairo-wm
-
-# Copy config files
-COPY --from=builder /build/src/shell/config/init /os/etc/kairo/init
-RUN chmod +x /os/etc/kairo/init
-
-# Final Image (based on alpine to include libs)
+# Stage 3: Final image
 FROM alpine:edge
-# Copy installed packages from rootfs stage (actually we can just install them here)
 RUN apk add --no-cache \
     openrc \
     util-linux \
@@ -82,6 +50,9 @@ RUN apk add --no-cache \
 COPY --from=builder /build/zig-out/bin/kairo-init /init
 COPY --from=builder /build/zig-out/bin/river /usr/bin/river
 COPY --from=builder /build/zig-out/bin/kairo-wm /usr/bin/kairo-wm
+COPY --from=builder /build/zig-out/bin/kairo-brand /usr/bin/kairo-brand
+COPY --from=builder /build/zig-out/bin/kairo-agent-ui /usr/bin/kairo-agent-ui
+COPY --from=bun-builder /tmp/kairo-kernel /usr/bin/kairo-kernel
 COPY --from=builder /build/src/shell/config/init /etc/kairo/init
 
 # Set executable
