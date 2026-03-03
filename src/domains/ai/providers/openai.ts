@@ -33,6 +33,9 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async embed(text: string, options?: AIEmbeddingOptions): Promise<AIEmbeddingResponse> {
+    if (!this.apiKey || this.apiKey.trim().length == 0) {
+      throw new Error("OPENAI_API_KEY missing");
+    }
     const model = options?.model || this.defaultEmbeddingModel;
 
     try {
@@ -83,6 +86,9 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async chat(messages: AIMessage[], options?: AICompletionOptions): Promise<AIChatResponse> {
+    if (!this.apiKey || this.apiKey.trim().length == 0) {
+      throw new Error("OPENAI_API_KEY missing");
+    }
     const model = options?.model || this.defaultModel;
     
     try {

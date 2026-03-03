@@ -70,8 +70,8 @@ export function diffTree(
  * 对比两个 props 对象，返回变化的键值对
  */
 function diffProps(
-  oldProps: Record<string, any>,
-  newProps: Record<string, any>
+  oldProps: Record<string, any> = {},
+  newProps: Record<string, any> = {}
 ): Record<string, any> {
   const changes: Record<string, any> = {};
 

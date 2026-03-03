@@ -580,6 +580,14 @@ export class AgentRuntime {
 
     } catch (error) {
       console.error("[AgentRuntime] Error in tick:", error);
+      const msg = this.describeRuntimeError(error);
+      await this.publish({
+        type: "kairo.agent.action",
+        source: "agent:" + this.id,
+        data: { action: { type: "say", content: msg } },
+        correlationId,
+        causationId
+      });
     }
   }
 
@@ -766,6 +774,14 @@ Or if no action is needed (waiting for user):
         action: { type: "noop" }
       };
     }
+  }
+
+  private describeRuntimeError(error: unknown): string {
+    const raw = error instanceof Error ? error.message : String(error);
+    if (raw.includes("OPENAI_API_KEY missing") || raw.includes("401")) {
+      return "LLM 未配置或密钥无效。请设置 OPENAI_API_KEY（或切换可用模型）后重试。";
+    }
+    return "Agent 暂时不可用，已记录错误日志。请稍后重试。";
   }
 
   private async publish(payload: any) {

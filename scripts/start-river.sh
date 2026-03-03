@@ -36,8 +36,8 @@ if [ -e /dev/dri/card0 ]; then
   export WLR_DRM_DEVICES=/dev/dri/card0
 fi
 
-# 日志级别
-export RIVER_LOG_LEVEL="${RIVER_LOG_LEVEL:-debug}"
+# 日志级别（默认 info，避免 debug 日志影响交互性能）
+export RIVER_LOG_LEVEL="${RIVER_LOG_LEVEL:-info}"
 
 echo "=== 启动 Kairo River ==="
 echo "XDG_RUNTIME_DIR: $XDG_RUNTIME_DIR"
@@ -47,7 +47,7 @@ echo ""
 
 # 通过 seatd-launch 启动（SSH 会话需要独立 seat 分配）
 if command -v seatd-launch >/dev/null 2>&1; then
-  exec seatd-launch -- river -log-level debug
+  exec seatd-launch -- river -log-level "$RIVER_LOG_LEVEL"
 else
-  exec river -log-level debug
+  exec river -log-level "$RIVER_LOG_LEVEL"
 fi

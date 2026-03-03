@@ -93,6 +93,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .link_libc = true,
     });
+    // Make cImport of FreeType headers work across common dev environments
+    // (Linux distro headers and Homebrew on macOS), including ZLS indexing.
+    text_render_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+    text_render_mod.addIncludePath(.{ .cwd_relative = "/usr/local/include/freetype2" });
+    text_render_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
     text_render_mod.linkSystemLibrary("freetype2", .{});
     const ipc_client_mod = b.createModule(.{ .root_source_file = b.path("src/apps/common/ipc_client.zig") });
 

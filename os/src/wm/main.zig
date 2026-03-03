@@ -5,6 +5,13 @@ const river = wayland.client.river;
 const kairo = wayland.client.kairo;
 const ipc = @import("ipc.zig");
 
+var wm_verbose_log: bool = false;
+
+inline fn wmDebug(comptime fmt: []const u8, args: anytype) void {
+    if (!wm_verbose_log) return;
+    std.debug.print(fmt, args);
+}
+
 // ============================================================
 // 数据结构
 // ============================================================
@@ -237,7 +244,7 @@ fn seatListener(seat: *river.SeatV1, event: river.SeatV1.Event, ctx: *Context) v
 }
 
 fn wmListener(wm: *river.WindowManagerV1, event: river.WindowManagerV1.Event, ctx: *Context) void {
-    std.debug.print("WM: event received: {}\n", .{@intFromEnum(event)});
+    wmDebug("WM: event received: {}\n", .{@intFromEnum(event)});
     switch (event) {
         .window => |ev| {
             const win = ctx.allocator.create(Window) catch return;
@@ -417,7 +424,7 @@ fn proposeDimensions(ctx: *Context) void {
         }
     }
 
-    std.debug.print("WM: proposed dimensions for {} xdg windows (floating)\n", .{visible_xdg});
+    wmDebug("WM: proposed dimensions for {} xdg windows (floating)\n", .{visible_xdg});
 }
 
 /// Render sequence: 定位所有窗口节点（浮动级联模式）
@@ -476,7 +483,7 @@ fn positionWindows(ctx: *Context) void {
         idx += 1;
     }
 
-    std.debug.print("WM: positioned {} windows (floating)\n", .{total});
+    wmDebug("WM: positioned {} windows (floating)\n", .{total});
 }
 
 /// 通过 IPC 通知内核当前窗口列表（供面板更新）
@@ -977,6 +984,7 @@ fn createKdpWindow(ctx: *Context, title: []const u8, json: [:0]const u8) void {
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
+    wm_verbose_log = std.posix.getenv("KAIRO_WM_VERBOSE_LOG") != null;
 
     var ctx = Context{
         .wm_global = null,
@@ -1078,10 +1086,10 @@ pub fn main() !void {
                 if (client.readPacket(allocator)) |packet_opt| {
                     if (packet_opt) |packet| {
                         defer allocator.free(packet.payload);
-                        std.debug.print("Received IPC packet: type={}, len={}\n", .{ packet.type, packet.payload.len });
+                        wmDebug("Received IPC packet: type={}, len={}\n", .{ packet.type, packet.payload.len });
 
                         if (ipc.Client.isAgentActiveEvent(packet)) |active| {
-                            std.debug.print("Agent Active State Changed: {}\n", .{active});
+                            wmDebug("Agent Active State Changed: {}\n", .{active});
                             ctx.agent_active = active;
                             if (ctx.wm_global) |wm| wm.manageDirty();
                         }

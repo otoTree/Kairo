@@ -40,17 +40,20 @@ pub fn fillRect(
     const x1: u32 = @intCast(@min(@max(x + w, 0), @as(i32, @intCast(buf_w))));
     const y1: u32 = @intCast(@min(@max(y + h, 0), @as(i32, @intCast(buf_h))));
 
+    const row_w: usize = @intCast(x1 - x0);
     const is_opaque = ((color >> 24) & 0xFF) == 255;
     var py = y0;
     while (py < y1) : (py += 1) {
-        var px = x0;
-        while (px < x1) : (px += 1) {
-            const idx = py * buf_w + px;
-            if (is_opaque) {
-                buf[idx] = color;
-            } else {
-                buf[idx] = alphaBlend(buf[idx], color);
-            }
+        const row_start: usize = @intCast(py * buf_w + x0);
+        if (is_opaque) {
+            @memset(buf[row_start .. row_start + row_w], color);
+            continue;
+        }
+
+        var i: usize = 0;
+        while (i < row_w) : (i += 1) {
+            const idx = row_start + i;
+            buf[idx] = alphaBlend(buf[idx], color);
         }
     }
 }

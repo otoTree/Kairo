@@ -7,6 +7,7 @@ VM_NAME="${1:-kairo-river}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 KAIRO_DIR="$(dirname "$SCRIPT_DIR")"
 DIST_DIR="$KAIRO_DIR/os/dist"
+ENV_TMP=""
 
 echo "=== Kairo River 部署脚本 ==="
 echo "VM: $VM_NAME"
@@ -39,6 +40,16 @@ limactl copy "$KAIRO_DIR/configs/fuzzel/fuzzel.ini" "${VM_NAME}:/tmp/fuzzel.ini"
 limactl copy "$KAIRO_DIR/configs/gtk-3.0/settings.ini" "${VM_NAME}:/tmp/gtk-settings.ini"
 limactl copy "$KAIRO_DIR/scripts/kairo-agent-status.sh" "${VM_NAME}:/tmp/kairo-agent-status"
 
+# 可选：同步宿主机 .env 的 AI/服务配置（仅白名单键）
+if [ -f "$KAIRO_DIR/.env" ]; then
+  ENV_TMP="$(mktemp)"
+  awk -F= '/^(OPENAI_|OLLAMA_|KAIRO_TOKEN|PORT)/ {print $0}' "$KAIRO_DIR/.env" > "$ENV_TMP"
+  if [ -s "$ENV_TMP" ]; then
+    echo "同步 .env（OPENAI_/OLLAMA_/KAIRO_TOKEN/PORT）..."
+    limactl copy "$ENV_TMP" "${VM_NAME}:/tmp/kairo.env"
+  fi
+fi
+
 # 在 VM 内安装
 echo "安装到 VM..."
 limactl shell "$VM_NAME" -- sh -c '
@@ -55,6 +66,12 @@ limactl shell "$VM_NAME" -- sh -c '
 
   sudo cp /tmp/start-river /usr/local/bin/start-river
   sudo chmod +x /usr/local/bin/start-river
+
+  if [ -f /tmp/kairo.env ]; then
+    mkdir -p "$HOME/.config/kairo"
+    cp /tmp/kairo.env "$HOME/.config/kairo/kairo.env"
+    chmod 600 "$HOME/.config/kairo/kairo.env"
+  fi
 
   # 部署桌面配置文件
   mkdir -p "$HOME/.config/foot" "$HOME/.config/waybar" "$HOME/.config/fuzzel" "$HOME/.config/gtk-3.0"
@@ -100,6 +117,7 @@ DEOF
   # 清理临时文件
   rm -f /tmp/river /tmp/kairo-wm /tmp/kairo-kernel /tmp/kairo-brand /tmp/kairo-agent-ui /tmp/river-init /tmp/start-river
   rm -f /tmp/foot.ini /tmp/waybar-config /tmp/waybar-style.css /tmp/fuzzel.ini /tmp/gtk-settings.ini /tmp/kairo-agent-status
+  rm -f /tmp/kairo.env
 
   echo ""
   echo "=== 验证 ==="
@@ -114,6 +132,10 @@ DEOF
   echo "fuzzel:       $(which fuzzel 2>/dev/null || echo 未找到)"
   echo "init:         $HOME/.config/river/init"
 '
+
+if [ -n "$ENV_TMP" ]; then
+  rm -f "$ENV_TMP"
+fi
 
 echo ""
 echo "部署完成! 执行: limactl shell $VM_NAME -- start-river"

@@ -9,6 +9,7 @@ pub const Role = enum { user, agent };
 pub const ChatMessage = struct {
     role: Role,
     text: []const u8, // 由 allocator 分配
+    bubble_w: i32 = -1,
 };
 
 const BUBBLE_H: i32 = 32;
@@ -20,6 +21,7 @@ const MAX_BUBBLE_W: i32 = 400;
 pub const MessageList = struct {
     messages: std.ArrayList(ChatMessage),
     scroll_offset: i32 = 0,
+    viewport_h: i32 = 300,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) MessageList {
@@ -32,7 +34,11 @@ pub const MessageList = struct {
     /// 添加消息（复制文本）
     pub fn addMessage(self: *MessageList, role: Role, text: []const u8) !void {
         const text_copy = try self.allocator.dupe(u8, text);
-        try self.messages.append(self.allocator, .{ .role = role, .text = text_copy });
+        try self.messages.append(self.allocator, .{
+            .role = role,
+            .text = text_copy,
+            .bubble_w = -1,
+        });
         // 自动滚动到底部
         self.scrollToBottom();
     }
@@ -45,7 +51,7 @@ pub const MessageList = struct {
     fn scrollToBottom(self: *MessageList) void {
         const total_h = self.totalHeight();
         if (total_h > 0) {
-            self.scroll_offset = @max(0, total_h - 300); // 大致可见区域高度
+            self.scroll_offset = @max(0, total_h - self.viewport_h);
         }
     }
 
@@ -66,12 +72,14 @@ pub const MessageList = struct {
         area_w: i32,
         area_h: i32,
     ) void {
+        self.viewport_h = @max(area_h, 1);
+
         // 消息区域背景
         draw.fillRect(buf, buf_w, buf_h, area_x, area_y, area_w, area_h, colors.BG_BASE);
 
         var y_pos: i32 = area_y + BUBBLE_GAP - self.scroll_offset;
 
-        for (self.messages.items) |msg| {
+        for (self.messages.items) |*msg| {
             // 跳过不可见的消息
             if (y_pos + BUBBLE_H < area_y) {
                 y_pos += BUBBLE_H + BUBBLE_GAP;
@@ -80,8 +88,11 @@ pub const MessageList = struct {
             if (y_pos > area_y + area_h) break;
 
             // 估算气泡宽度
-            const text_w: i32 = @intCast(text_renderer.measureText(msg.text, FONT_SIZE));
-            const bubble_w = @min(text_w + 2 * BUBBLE_PAD, MAX_BUBBLE_W);
+            if (msg.bubble_w < 0) {
+                const text_w: i32 = @intCast(text_renderer.measureText(msg.text, FONT_SIZE));
+                msg.bubble_w = @min(text_w + 2 * BUBBLE_PAD, MAX_BUBBLE_W);
+            }
+            const bubble_w = msg.bubble_w;
 
             const is_user = msg.role == .user;
             const bubble_x = if (is_user)

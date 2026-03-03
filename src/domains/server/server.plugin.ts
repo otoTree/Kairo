@@ -10,6 +10,7 @@ import type { ServerWebSocket } from "bun";
 
 export class ServerPlugin implements Plugin {
   readonly name = "server";
+  private static readonly MAX_WS_MESSAGE_BYTES = 64 * 1024;
   private app: Hono;
   private port: number;
   private coreApp?: Application;
@@ -148,10 +149,6 @@ export class ServerPlugin implements Plugin {
                 this.broadcast(event);
             });
             
-            bus.subscribe("kairo.system.log", (event) => {
-                 this.broadcast(event);
-            });
-            
             // Also subscribe to legacy output for compatibility if Runtime emits them?
             // Runtime emits kairo.agent.thought, etc.
             
@@ -181,6 +178,10 @@ export class ServerPlugin implements Plugin {
 
   private broadcast(data: any) {
       const msg = JSON.stringify(data);
+      if (msg.length > ServerPlugin.MAX_WS_MESSAGE_BYTES) {
+          console.warn(`[Server] Skip oversized WS broadcast (${msg.length} bytes)`);
+          return;
+      }
       for (const ws of this.activeWebSockets) {
           try {
             ws.send(msg);

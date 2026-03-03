@@ -12,6 +12,7 @@ pub const Frame = struct {
 };
 
 pub const Opcode = enum(u4) {
+    continuation = 0x0,
     text = 0x1,
     close = 0x8,
     ping = 0x9,
@@ -21,7 +22,8 @@ pub const Opcode = enum(u4) {
 
 pub const WebSocket = struct {
     stream: net.Stream,
-    recv_buf: [4096]u8 = undefined,
+    recv_buf: [65536]u8 = undefined,
+    frag_buf: [262144]u8 = undefined,
     allocator: std.mem.Allocator,
     // 帧解析状态（支持非阻塞分段读取）
     parse_state: ParseState = .idle,
@@ -36,6 +38,10 @@ pub const WebSocket = struct {
     payload_read: usize = 0,
     frame_masked: bool = false,
     frame_opcode: Opcode = .text,
+    frame_fin: bool = false,
+    frag_active: bool = false,
+    frag_opcode: Opcode = .text,
+    frag_len: usize = 0,
 
     const ParseState = enum {
         idle,
@@ -115,6 +121,7 @@ pub const WebSocket = struct {
                 self.header_read += r;
             }
             // 解析帧头
+            self.frame_fin = (self.frame_header[0] & 0x80) != 0;
             self.frame_opcode = @enumFromInt(self.frame_header[0] & 0x0F);
             self.frame_masked = (self.frame_header[1] & 0x80) != 0;
             const len7: u64 = self.frame_header[1] & 0x7F;
@@ -181,6 +188,44 @@ pub const WebSocket = struct {
                     b.* ^= self.mask_key[i % 4];
                 }
             }
+
+            if (self.frame_opcode == .continuation) {
+                if (!self.frag_active) {
+                    self.resetParse();
+                    return null;
+                }
+                if (self.frag_len + self.payload_len > self.frag_buf.len) {
+                    self.resetFragment();
+                    self.resetParse();
+                    return error.FrameTooLarge;
+                }
+                @memcpy(self.frag_buf[self.frag_len .. self.frag_len + self.payload_len], self.recv_buf[0..self.payload_len]);
+                self.frag_len += self.payload_len;
+
+                self.resetParse();
+                if (!self.frame_fin) return null;
+
+                const frame = Frame{
+                    .opcode = self.frag_opcode,
+                    .payload = self.frag_buf[0..self.frag_len],
+                };
+                self.resetFragment();
+                return frame;
+            }
+
+            if (!self.frame_fin and self.frame_opcode == .text) {
+                if (self.payload_len > self.frag_buf.len) {
+                    self.resetParse();
+                    return error.FrameTooLarge;
+                }
+                @memcpy(self.frag_buf[0..self.payload_len], self.recv_buf[0..self.payload_len]);
+                self.frag_active = true;
+                self.frag_opcode = self.frame_opcode;
+                self.frag_len = self.payload_len;
+                self.resetParse();
+                return null;
+            }
+
             const frame = Frame{
                 .opcode = self.frame_opcode,
                 .payload = self.recv_buf[0..self.payload_len],
@@ -201,6 +246,13 @@ pub const WebSocket = struct {
         self.payload_len = 0;
         self.payload_read = 0;
         self.frame_masked = false;
+        self.frame_fin = false;
+    }
+
+    fn resetFragment(self: *WebSocket) void {
+        self.frag_active = false;
+        self.frag_opcode = .text;
+        self.frag_len = 0;
     }
 
     /// 发送 text frame（客户端必须 mask）
@@ -224,7 +276,7 @@ pub const WebSocket = struct {
         crypto.random.bytes(&mask_key);
         @memcpy(header_buf[header_len..][0..4], &mask_key);
         header_len += 4;
-        try self.stream.writeAll(header_buf[0..header_len]);
+        try writeAllNonBlocking(&self.stream, header_buf[0..header_len]);
         // 发送 masked payload
         var masked_buf: [4096]u8 = undefined;
         var sent: usize = 0;
@@ -233,18 +285,62 @@ pub const WebSocket = struct {
             for (0..chunk) |i| {
                 masked_buf[i] = data[sent + i] ^ mask_key[(sent + i) % 4];
             }
-            try self.stream.writeAll(masked_buf[0..chunk]);
+            try writeAllNonBlocking(&self.stream, masked_buf[0..chunk]);
             sent += chunk;
         }
     }
 
     /// 发送 close frame
     pub fn sendClose(self: *WebSocket) !void {
-        const frame = [_]u8{ 0x88, 0x80, 0, 0, 0, 0 };
-        try self.stream.writeAll(&frame);
+        try self.sendControlFrame(0x8, &.{});
+    }
+
+    pub fn sendPong(self: *WebSocket, payload: []const u8) !void {
+        try self.sendControlFrame(0xA, payload);
     }
 
     pub fn close(self: *WebSocket) void {
         self.stream.close();
     }
+
+    fn sendControlFrame(self: *WebSocket, opcode: u8, payload: []const u8) !void {
+        if (payload.len > 125) return error.ControlFrameTooLarge;
+
+        var header: [6]u8 = undefined;
+        header[0] = 0x80 | opcode; // FIN + opcode
+        header[1] = 0x80 | @as(u8, @intCast(payload.len)); // masked
+
+        var mask_key: [4]u8 = undefined;
+        crypto.random.bytes(&mask_key);
+        @memcpy(header[2..6], &mask_key);
+        try writeAllNonBlocking(&self.stream, header[0..6]);
+
+        if (payload.len == 0) return;
+
+        var buf: [125]u8 = undefined;
+        for (payload, 0..) |b, i| {
+            buf[i] = b ^ mask_key[i % 4];
+        }
+        try writeAllNonBlocking(&self.stream, buf[0..payload.len]);
+    }
 };
+
+fn writeAllNonBlocking(stream: *net.Stream, data: []const u8) !void {
+    var written: usize = 0;
+    while (written < data.len) {
+        const n = stream.write(data[written..]) catch |err| switch (err) {
+            error.WouldBlock => {
+                var pfd = [1]posix.pollfd{.{
+                    .fd = stream.handle,
+                    .events = posix.POLL.OUT,
+                    .revents = 0,
+                }};
+                _ = try posix.poll(pfd[0..], 1000);
+                continue;
+            },
+            else => return err,
+        };
+        if (n == 0) return error.ConnectionResetByPeer;
+        written += n;
+    }
+}

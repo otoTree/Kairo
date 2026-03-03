@@ -1,7 +1,7 @@
 export interface RenderNode {
   type: ComponentType;
   id?: string;
-  props: Record<string, any>;
+  props?: Record<string, any>;
   signals?: Record<string, string>; // Signal -> Slot ID
   children?: RenderNode[];
 }

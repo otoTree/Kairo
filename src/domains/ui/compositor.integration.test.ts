@@ -59,6 +59,23 @@ describe('UI Diff 算法', () => {
     expect(addPatch).toBeDefined();
   });
 
+  it('应兼容缺失 props 的节点', () => {
+    const oldTree: RenderNode = {
+      type: 'Column',
+      children: [],
+    };
+    const newTree: RenderNode = {
+      type: 'Column',
+      children: [
+        { type: 'Text', props: { text: 'Hello' } },
+      ],
+    };
+
+    const patches = diffTree(oldTree, newTree);
+    const addPatch = patches.find(p => p.type === 'add');
+    expect(addPatch).toBeDefined();
+  });
+
   it('相同树应无差异', () => {
     const tree: RenderNode = {
       type: 'Column', props: {},

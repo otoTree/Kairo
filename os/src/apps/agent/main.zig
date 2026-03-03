@@ -134,8 +134,9 @@ fn onDraw(app: *wl_client.App) void {
     // 输入区域背景
     draw.fillRect(buf, w, h, 0, input_y + 1, @intCast(w), INPUT_AREA_H - 1, colors.BG_SURFACE);
 
-    // Agent 状态指示灯 (12, inputY+18, 8×8)
-    draw.fillRoundRect(buf, w, h, 12, input_y + 18, 8, 8, 4, colors.SEMANTIC_SUCCESS);
+    // Agent 状态指示灯 (12, inputY+18, 8×8) — 颜色随连接状态变化
+    const status_color: u32 = if (state.ws != null) colors.SEMANTIC_SUCCESS else colors.SEMANTIC_ERROR;
+    draw.fillRoundRect(buf, w, h, 12, input_y + 18, 8, 8, 4, status_color);
 
     // 输入框背景 (28, inputY+8, 500×28)
     draw.fillRoundRect(buf, w, h, 28, input_y + 8, 500, 28, 4, colors.BG_ELEVATED);
@@ -217,28 +218,36 @@ fn onScroll(app: *wl_client.App, _: u32, value: i32) void {
 fn onWsData(app: *wl_client.App) void {
     const state: *AgentState = @ptrCast(@alignCast(app.user_data.?));
     if (state.ws) |*ws| {
-        const frame = ws.readFrame() catch {
-            state.ws = null;
-            state.agent_status = "Disconnected";
-            app.requestRedraw();
-            return;
-        };
-        if (frame) |f| {
+        var changed = false;
+        while (true) {
+            const frame = ws.readFrame() catch {
+                state.ws = null;
+                state.agent_status = "Disconnected";
+                changed = true;
+                break;
+            };
+            const f = frame orelse break;
             switch (f.opcode) {
                 .text => {
-                    // 尝试提取消息文本（简化 JSON 解析）
-                    const text = extractJsonText(f.payload) orelse f.payload;
-                    state.messages.addMessage(.agent, text) catch {};
-                    state.agent_status = "Agent Ready";
-                    app.requestRedraw();
+                    if (handleServerEvent(state, f.payload)) {
+                        state.agent_status = "Agent Ready";
+                        changed = true;
+                    }
+                },
+                .ping => {
+                    ws.sendPong(f.payload) catch {};
                 },
                 .close => {
                     state.ws = null;
                     state.agent_status = "Disconnected";
-                    app.running = false;
+                    changed = true;
+                    break;
                 },
                 else => {},
             }
+        }
+        if (changed) {
+            app.requestRedraw();
         }
     }
 }
@@ -250,37 +259,203 @@ fn sendMessage(app: *wl_client.App, state: *AgentState) void {
 
     // 添加到消息列表
     state.messages.addMessage(.user, text) catch return;
-    state.agent_status = "Agent Thinking...";
 
     // 通过 WebSocket 发送
     if (state.ws) |*ws| {
-        var json_buf: [512]u8 = undefined;
-        const json = std.fmt.bufPrint(&json_buf,
-            "{{\"type\":\"user_message\",\"text\":\"{s}\"}}",
-            .{text},
-        ) catch return;
-        ws.sendText(json) catch {};
+        state.agent_status = "Agent Thinking...";
+        const json = buildUserMessageJson(state.allocator, text) catch {
+            state.agent_status = "Send Failed";
+            app.requestRedraw();
+            return;
+        };
+        defer state.allocator.free(json);
+        ws.sendText(json) catch {
+            state.agent_status = "Send Failed";
+        };
+    } else {
+        // 未连接时提示用户
+        state.messages.addMessage(.agent, "[Not connected to server]") catch {};
+        state.agent_status = "Disconnected";
     }
 
     state.input_len = 0;
     app.requestRedraw();
 }
 
-/// 简化 JSON 文本提取：查找 "text":"..." 或 "content":"..."
-fn extractJsonText(payload: []const u8) ?[]const u8 {
-    // 查找 "text":" 或 "content":"
-    const markers = [_][]const u8{ "\"text\":\"", "\"content\":\"" };
-    for (markers) |marker| {
-        if (std.mem.indexOf(u8, payload, marker)) |idx| {
-            const start = idx + marker.len;
-            if (start >= payload.len) continue;
-            // 查找结束引号
-            if (std.mem.indexOfScalar(u8, payload[start..], '"')) |end| {
-                return payload[start .. start + end];
-            }
+fn buildUserMessageJson(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
+    var escaped = try allocator.alloc(u8, text.len * 2 + 1);
+    defer allocator.free(escaped);
+
+    var n: usize = 0;
+    for (text) |ch| {
+        switch (ch) {
+            '"' => {
+                escaped[n] = '\\';
+                escaped[n + 1] = '"';
+                n += 2;
+            },
+            '\\' => {
+                escaped[n] = '\\';
+                escaped[n + 1] = '\\';
+                n += 2;
+            },
+            '\n' => {
+                escaped[n] = '\\';
+                escaped[n + 1] = 'n';
+                n += 2;
+            },
+            '\r' => {
+                escaped[n] = '\\';
+                escaped[n + 1] = 'r';
+                n += 2;
+            },
+            '\t' => {
+                escaped[n] = '\\';
+                escaped[n + 1] = 't';
+                n += 2;
+            },
+            else => {
+                escaped[n] = ch;
+                n += 1;
+            },
         }
     }
-    return null;
+
+    return std.fmt.allocPrint(allocator,
+        "{{\"type\":\"user_message\",\"text\":\"{s}\"}}",
+        .{escaped[0..n]},
+    );
+}
+
+fn handleServerEvent(state: *AgentState, payload: []const u8) bool {
+    const parsed = std.json.parseFromSlice(std.json.Value, state.allocator, payload, .{}) catch return false;
+    defer parsed.deinit();
+
+    if (parsed.value != .object) return false;
+    const root_obj = parsed.value.object;
+    const event_type = getJsonString(root_obj, "type") orelse return false;
+    const data_val = root_obj.get("data") orelse return false;
+    if (data_val != .object) return false;
+    const data_obj = data_val.object;
+
+    if (std.mem.eql(u8, event_type, "kairo.agent.action")) {
+        const action_val = data_obj.get("action") orelse return false;
+        if (action_val != .object) return false;
+        const action_obj = action_val.object;
+        const action_type = getJsonString(action_obj, "type") orelse return false;
+
+        if (std.mem.eql(u8, action_type, "say") or std.mem.eql(u8, action_type, "query")) {
+            const content = getJsonString(action_obj, "content") orelse return false;
+            state.messages.addMessage(.agent, content) catch return false;
+            return true;
+        }
+        if (std.mem.eql(u8, action_type, "render")) {
+            if (action_obj.get("tree")) |tree_val| {
+                return appendRenderPreview(state, tree_val);
+            }
+            return false;
+        }
+        return false;
+    }
+
+    if (std.mem.eql(u8, event_type, "kairo.agent.render.commit")) {
+        if (data_obj.get("tree")) |tree_val| {
+            return appendRenderPreview(state, tree_val);
+        }
+        return false;
+    }
+
+    if (std.mem.eql(u8, event_type, "kairo.tool.result")) {
+        if (getJsonString(data_obj, "error")) |err| {
+            state.messages.addMessage(.agent, err) catch return false;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+fn appendRenderPreview(state: *AgentState, tree_val: std.json.Value) bool {
+    var lines = std.ArrayList(u8){};
+    defer lines.deinit(state.allocator);
+
+    collectRenderLines(&lines, state.allocator, tree_val) catch return false;
+    if (lines.items.len == 0) return false;
+
+    var msg = std.ArrayList(u8){};
+    defer msg.deinit(state.allocator);
+    msg.appendSlice(state.allocator, "[Web Render]\n") catch return false;
+    msg.appendSlice(state.allocator, lines.items) catch return false;
+
+    state.messages.addMessage(.agent, msg.items) catch return false;
+    return true;
+}
+
+fn collectRenderLines(out: *std.ArrayList(u8), allocator: std.mem.Allocator, value: std.json.Value) !void {
+    switch (value) {
+        .array => |arr| {
+            for (arr.items) |item| {
+                try collectRenderLines(out, allocator, item);
+            }
+        },
+        .object => |obj| {
+            if (obj.get("type")) |type_val| {
+                if (type_val == .string) {
+                    const node_type = type_val.string;
+                    if (std.mem.eql(u8, node_type, "Text") or std.mem.eql(u8, node_type, "text")) {
+                        if (obj.get("props")) |props_val| {
+                            if (props_val == .object) {
+                                if (getJsonString(props_val.object, "text")) |t| {
+                                    try appendLine(out, allocator, t);
+                                }
+                            }
+                        }
+                        if (getJsonString(obj, "text")) |t| {
+                            try appendLine(out, allocator, t);
+                        }
+                    } else if (std.mem.eql(u8, node_type, "Button") or std.mem.eql(u8, node_type, "button")) {
+                        if (obj.get("props")) |props_val| {
+                            if (props_val == .object) {
+                                if (getJsonString(props_val.object, "label")) |t| {
+                                    try appendLine(out, allocator, t);
+                                }
+                            }
+                        }
+                        if (getJsonString(obj, "label")) |t| {
+                            try appendLine(out, allocator, t);
+                        }
+                    } else if (std.mem.eql(u8, node_type, "TextInput") or std.mem.eql(u8, node_type, "input")) {
+                        if (obj.get("props")) |props_val| {
+                            if (props_val == .object) {
+                                if (getJsonString(props_val.object, "value")) |t| {
+                                    try appendLine(out, allocator, t);
+                                } else if (getJsonString(props_val.object, "placeholder")) |t| {
+                                    try appendLine(out, allocator, t);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (obj.get("children")) |children_val| {
+                try collectRenderLines(out, allocator, children_val);
+            }
+        },
+        else => {},
+    }
+}
+
+fn appendLine(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
+    if (text.len == 0) return;
+    if (out.items.len > 0) try out.appendSlice(allocator, "\n");
+    try out.appendSlice(allocator, text);
+}
+
+fn getJsonString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const v = obj.get(key) orelse return null;
+    if (v != .string) return null;
+    return v.string;
 }
 
 /// evdev keycode → ASCII（简化映射，仅基本字符）
