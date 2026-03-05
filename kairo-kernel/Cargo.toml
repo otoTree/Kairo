@@ -1,0 +1,30 @@
+[package]
+name = "kairo-kernel"
+version = "0.1.0"
+edition = "2021"
+
+# 禁用 panic 展开，使用 abort 策略
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
+[dependencies]
+# 引导加载器 API（现代版本）
+bootloader_api = "0.11"
+
+# x86_64 架构支持（最新版本）
+x86_64 = "0.15"
+
+# 无锁同步原语（no_std 兼容）
+spin = "0.9"
+
+# 延迟初始化（no_std 兼容）
+[dependencies.lazy_static]
+version = "1.4"
+features = ["spin_no_std"]
+
+# 构建依赖：用于创建引导镜像
+[build-dependencies]
+bootloader = "0.11"

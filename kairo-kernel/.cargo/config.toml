@@ -1,0 +1,8 @@
+[build]
+# 使用内置的 x86_64-unknown-none 目标
+target = "x86_64-unknown-none"
+
+[unstable]
+# 构建标准库的核心部分（no_std 环境）
+build-std = ["core", "compiler_builtins", "alloc"]
+build-std-features = ["compiler-builtins-mem"]

@@ -52,3 +52,5 @@ os/main
 *.tar.gz
 
 .vscode/
+
+target/
