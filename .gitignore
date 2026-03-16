@@ -1,56 +1,23 @@
-# dependencies (bun install)
-node_modules
+# Rust 构建产物
+target/
+**/target/
 
-# output
-out
-dist
-*.tgz
+# Cargo 备份与临时文件
+Cargo.toml.orig
 
-# code coverage
-coverage
-*.lcov
-
-# logs
-logs
-*.log
-report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-
-# dotenv environment variable files
-.env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
-
-# caches
-.eslintcache
-.cache
-*.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
+# macOS 系统文件
 .DS_Store
 
-*.db
-*.db-shm
-*.db-wal
-
-# Ignored repositories
-/river/
-
-.zig-cache/
-zig-out/
-
-# Local VM and Data
-.lima/
-data/
-
-# OS Artifacts
-os/main
-*.tar.gz
-
+# 编辑器与 IDE 文件
+.idea/
 .vscode/
 
-target/
+# 日志与临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+
+# 环境变量文件
+.env
+.env.*
