@@ -1,561 +1,249 @@
 # Kairo
 
-Kairo 是一个以 Rust 为主实现的操作系统原型，目标是在保证内核核心模块可控、可维护、尽量内存安全的前提下，逐步提供对 Linux 用户态程序的兼容运行能力。
+Kairo 是一个以 Rust 为主实现的 agent-native 系统平台原型。  
+它的目标不是复刻传统 Linux 内核，也不是做一个只负责启动和调度普通进程的操作系统，而是构建一个能够原生承载模型执行、模型内生 agent 行为、多执行域和多平台实现的统一系统底座。
 
-当前仓库处于早期阶段，现有代码主要聚焦于内核启动、基础输出和构建流程。本文档用于定义项目目标、系统架构、兼容策略和演进路线，作为后续开发的统一技术基线。
+当前仓库仍处于极早期阶段，现有代码主要完成了最小内核启动、串口输出、framebuffer 验证和基础构建流程。真正重要的工作还在架构层：在功能大规模展开之前，先把系统语义、对象模型、执行边界和平台方向定准。
 
-## 1. 项目目标
+## 1. 项目定位
 
-Kairo 的核心目标不是“重新实现一个完整 Linux 发行版”，而是构建一个基于 Rust 的新操作系统，并优先实现 Linux 用户态 ABI 兼容。
+Kairo 的长期目标不是“做一个更现代的宏内核”，而是构建一个面向以下需求的系统平台：
 
-项目分为三个层次目标：
+1. 最小而稳定的核心机制
+2. 可演化的系统服务与对象模型
+3. 多执行域共存
+4. 模型执行作为系统一等能力
+5. 模型内生 agent 行为作为顶层目标
+6. 纯 CPU、纯 GPU、hybrid 三类平台实现
+7. 不为传统 Linux 生态兼容保留目标地位
 
-1. 能够稳定启动到用户态，并运行最小用户程序。
-2. 能够运行一部分常见 Linux ELF 程序，优先支持简单命令行工具。
-3. 在兼容能力逐步增强的同时，保持内核模块化和 Rust 主导实现。
+因此，Kairo 更接近：
 
-为了避免目标过大，Kairo 早期不追求完整硬件生态兼容，也不追求一次性支持所有 Linux 应用。项目优先保证可验证的里程碑推进。
+- 一个 agent-native systems platform
+- 一个 model-aware execution substrate
+- 一个支持内执行与外执行协同的多层运行环境
 
-## 2. 设计原则
+而不只是一个传统意义上的操作系统。
 
-### 2.1 Rust 主导
+## 2. 定调原则
 
-内核中的大部分逻辑使用 Rust 实现，仅在以下场景保留少量汇编：
+### 2.1 核心只保留稳定机制
 
-- 启动入口
-- 中断和异常入口
-- 上下文切换
-- 特定架构寄存器操作
+Kairo 的核心层不应过早承载 POSIX、传统文件系统、传统线程模型等高层语义。  
+核心层应只保留最难替换、最需要稳定的机制，例如：
 
-### 2.2 兼容优先于“形式纯粹”
+- 对象引用
+- 最小隔离
+- 执行单元
+- 事件与故障
+- 地址空间或等价隔离视图
+- 最小权限检查
 
-如果某个接口设计在理论上更优雅，但会显著增加 Linux 程序兼容成本，则优先考虑兼容行为。对于目标中的用户态兼容而言，ABI 和行为一致性比内部抽象更重要。
+### 2.2 高层语义通过服务与域组织
 
-### 2.3 先最小可用，再逐步增强
+高层能力不应默认堆进核心，而应通过两类边界组织：
 
-项目采用分阶段演进策略，优先实现“能跑起来”的最小闭环，再逐步扩展系统调用、文件系统、线程、网络和动态链接能力。
+- `System Services`
+- `Execution Domains`
 
-### 2.4 优先支持虚拟化平台
+前者定义系统能力边界，后者定义对外运行环境语义。
 
-早期仅优先支持 QEMU 和 virtio 设备，以降低驱动开发复杂度，加快调试与验证速度。
+### 2.3 模型执行是系统能力，不是普通应用行为
 
-## 3. 总体定位
+权重、张量、KV cache、推理会话、执行计划、计算设备都应被视为系统对象，而不是普通用户态进程的私有实现细节。
 
-Kairo 建议采用“Rust 混合内核 + Linux ABI 兼容层”的总体路线。
+### 2.4 模型是 agent 行为主体
 
+Kairo 不应构建一个厚重的外部 runtime 去替模型完成 think、review、plan、act。  
+这些行为应尽量内化到模型本身。外部系统层只负责：
+
+- 环境语义统一
+- observation 统一
+- action surface 统一
+- capability 与 lease 边界
+- 资源治理与可验证反馈
+
+### 2.5 CPU 不是默认控制平面
+
+Kairo 必须支持：
+
+- 纯 CPU realization
+- 纯 GPU realization
+- CPU/GPU hybrid realization
+
+并且纯 GPU 情况可能不存在通用 CPU 控制流参与。  
+因此任何核心抽象都不能默认写死为 CPU 专属。
+
+### 2.6 不为传统 Linux 兼容保留地位
+
+Kairo 当前阶段不以兼容传统 Linux 生态为目标。  
+任何未来可能出现的兼容层，都只能作为边缘桥接能力存在，不能反向定义 Kairo 的核心对象模型、执行模型和平台设计。
+
+## 3. 总体架构
+
+Kairo 当前建议采用如下整体结构：
+
+```text
++------------------------------------------------------+
+| Model Core                                           |
+| - think / review / plan / act / self-check           |
+| - parametric execution                               |
++------------------------------------------------------+
+| Agent Environment Layer                              |
+| - observation / action / capability / lease          |
+| - context / memory surfaces                          |
++------------------------------------------------------+
+| Dual Execution Layer                                 |
+| - Parametric Execution                               |
+| - Sandboxed Execution                                |
++------------------------------------------------------+
+| Model Runtime Substrate                              |
+| - Weight Store                                       |
+| - Tensor Buffer                                      |
+| - KV Cache                                           |
+| - Inference Session                                  |
+| - Execution Plan                                     |
++------------------------------------------------------+
+| Execution Domains                                    |
+| - Native Domain                                      |
+| - Inference Domain                                   |
+| - Agent Domain                                       |
+| - Wasm Domain                                        |
+| - Driver Domain                                      |
+| - Service Domain                                     |
++------------------------------------------------------+
+| System Services                                      |
+| - Process / File / Namespace / Device / Network      |
++------------------------------------------------------+
+| Core Mechanisms                                      |
+| - Handle / Capability / Channel / Fault / Isolation  |
++------------------------------------------------------+
+| Platform Realizations                                |
+| - CPU / GPU / Hybrid                                 |
++------------------------------------------------------+
+```
+
+这套结构体现了 Kairo 的几条关键判断：
+
+- 不是所有执行都应该发生在模型外部
+- 也不是所有逻辑都应该进入权重
+- 执行域和平台实现是两层不同概念
+- 模型本身是 agent 行为主体，系统负责统一环境语义
+
+## 4. 核心对象方向
+
+在功能展开前，Kairo 更需要先稳定对象模型。当前建议优先围绕以下对象统一系统语言：
+
+- `Handle`
+- `Capability`
+- `ExecutionUnit`
+- `ProtectionDomain`
+- `AddressSpace`
+- `Channel`
+- `Namespace`
+- `WeightStore`
+- `TensorBuffer`
+- `KvCache`
+- `InferenceSession`
+- `ExecutionPlan`
+- `ExecutionDomain`
+
+最重要的约束是：
+
+- `ExecutionUnit` 不应直接等于 thread
+- `ProtectionDomain` 不应直接等于传统 process
+- `ExecutionDomain` 不应直接等于系统整体
+- `InferenceSession` 不应直接等于普通进程
+- `WeightStore` 不应直接等于普通文件
+
+## 5. 双层执行
+
+Kairo 明确支持两类执行能力：
+
+### 5.1 Parametric Execution
+
+指程序逻辑被内化到模型参数、模型内部执行器或推理快路径中。  
+它适合：
+
+- 高频
+- 低延迟
+- 结构稳定
+- 不涉及强副作用
+
+### 5.2 Sandboxed Execution
+
+指程序逻辑在独立、受控、可审计的执行边界中运行。  
+在 Kairo 中，这类执行的主要载体应是 `WasmDomain`。
+
+这意味着 Wasm 在 Kairo 中可能有两种角色：
+
+- `WASM-as-Weights`
+- `WASM-as-Sandbox`
+
+Kairo 不应在这两者之间二选一，而应允许统一编排。
+
+## 6. 平台方向
+
+Kairo 必须原生支持三类平台实现：
+
+### 6.1 CPU Realization
+
+适合作为早期 bring-up、调试和基础验证平台。
+
+### 6.2 GPU Realization
+
+纯 GPU 不是“GPU 加速”，而是可能由 GPU 直接承载控制与执行语义的系统实现形态。
+
+### 6.3 Hybrid Realization
+
+CPU 与 GPU 协同承载模型执行、环境语义层和系统控制。
+
+## 7. 传统生态的处理方式
+
+Kairo 当前阶段不为传统 Linux 生态兼容保留主线资源。  
 这意味着：
 
-- 内核本身不是 Linux 内核。
-- 用户态执行环境尽量提供 Linux 程序期望的接口。
-- 文件系统布局、进程模型、系统调用接口、伪文件系统等尽量向 Linux 靠拢。
-
-从工程角度看，这条路线比“完全重写 Linux”更可行，也比“做一个纯教学型内核”更有实际价值。
-
-## 4. 系统总体架构
-
-```text
-+------------------------------------------------------+
-| Linux 应用程序 (busybox, shell, tools, services)     |
-+------------------------+-----------------------------+
-                         |
-                         v
-+------------------------------------------------------+
-| Linux ABI 兼容层                                       |
-| - syscall dispatcher                                 |
-| - ELF 加载与解释器支持                                 |
-| - 信号、线程、futex 语义                               |
-| - /proc、/dev、/tmp 等接口映射                         |
-+------------------------+-----------------------------+
-                         |
-                         v
-+------------------------------------------------------+
-| 用户态基础服务                                         |
-| - init                                                |
-| - 动态链接支持                                         |
-| - 设备管理与系统服务                                   |
-+------------------------+-----------------------------+
-                         |
-                         v
-+------------------------------------------------------+
-| Rust 内核                                              |
-| - 启动与架构支持                                       |
-| - 内存管理                                             |
-| - 调度器                                               |
-| - VFS                                                  |
-| - IPC                                                  |
-| - 网络栈                                               |
-| - 驱动框架                                             |
-+------------------------------------------------------+
-                         |
-                         v
-+------------------------------------------------------+
-| x86_64 / aarch64 硬件                                 |
-+------------------------------------------------------+
-```
-
-## 5. 内核架构设计
-
-Kairo 适合采用偏宏内核的混合设计，而不是纯微内核。
-
-原因很直接：Linux 用户态兼容要求高频 syscall、复杂进程语义和文件系统行为，如果过早把所有功能拆成用户态服务，会显著增加早期复杂度和调试成本。
-
-建议内核包含以下核心子系统。
-
-### 5.1 启动与平台初始化
-
-职责包括：
-
-- UEFI 启动支持
-- 内核镜像加载
-- 页表初始化
-- 内存映射准备
-- 中断描述符表和异常入口初始化
-- 启动日志输出
-
-早期建议优先支持 x86_64，待核心抽象稳定后再扩展 aarch64。
-
-### 5.2 内存管理
-
-内存管理模块负责：
-
-- 物理页分配器
-- 虚拟地址空间管理
-- 用户态与内核态地址空间隔离
-- 页错误处理
-- `mmap`、`munmap`、`mprotect`
-- `brk` 堆扩展
-
-这是 Linux 程序兼容的核心基础之一，因为动态链接器、C 运行时和线程库都会依赖这些行为。
-
-### 5.3 进程与线程调度
-
-调度子系统负责：
-
-- 进程创建与销毁
-- 线程创建与切换
-- 抢占式调度
-- 多核调度基础
-- 线程组与任务状态管理
-- 阻塞与唤醒
-
-如果要兼容 Linux 线程模型，后续必须提供接近 Linux 的 `clone` 语义和 `futex` 行为。
-
-### 5.4 虚拟文件系统
-
-VFS 应作为内核中的关键抽象层，统一管理：
-
-- inode
-- dentry
-- file
-- mount
-- 路径解析
-- 权限校验
-
-早期可以先实现最小 VFS，再挂载 `tmpfs`、只读根文件系统和 `procfs/devfs`。
-
-### 5.5 文件系统支持
-
-建议按以下顺序推进：
-
-1. `tmpfs`
-2. initramfs
-3. 只读 `ext4`
-4. 可写 `ext4` 或自研日志文件系统
-
-早期目标是支撑系统启动和基础命令运行，因此先保证可靠读取和最小写能力，而不是追求复杂特性。
-
-### 5.6 设备驱动框架
-
-驱动层早期建议聚焦 virtio：
-
-- `virtio-blk`
-- `virtio-net`
-- `virtio-gpu`
-- `virtio-input`
-- 串口输出
-- 基础定时器
-
-这样可以在 QEMU 中快速形成完整调试闭环。
-
-### 5.7 IPC 与同步
-
-为了兼容 Linux 程序，内核至少需要支持：
-
-- pipe
-- unix socket
-- signal
-- 共享内存
-- futex
-
-其中 `futex` 将直接影响 `pthread`、`glibc` 和大量多线程程序是否可运行。
-
-### 5.8 网络栈
-
-网络建议在基础兼容稳定后引入，分阶段实现：
-
-1. loopback
-2. 基础 IPv4
-3. TCP/UDP
-4. socket API
-5. `poll` / `select` / `epoll`
-
-## 6. Linux 兼容策略
-
-“能兼容 Linux 程序”并不只是实现一组 syscall 编号，而是要兼容一整套用户态预期。
-
-### 6.1 ELF 可执行文件支持
-
-内核或配套加载器需要支持：
-
-- `ELF64`
-- 静态链接程序
-- PIE 可执行文件
-- 共享库映射
-- `PT_INTERP`
-- 用户栈初始化
-- `auxv`
-
-如果没有正确的 ELF 装载语义，很多程序甚至无法进入 `main`。
-
-### 6.2 Linux syscall ABI
-
-早期应优先支持最常见的一批系统调用：
-
-- `read`
-- `write`
-- `openat`
-- `close`
-- `mmap`
-- `munmap`
-- `mprotect`
-- `brk`
-- `execve`
-- `exit`
-- `wait4`
-- `clone`
-- `futex`
-- `rt_sigaction`
-- `rt_sigprocmask`
-- `clock_gettime`
-- `nanosleep`
-- `stat`
-- `fstat`
-- `newfstatat`
-- `getdents64`
-- `ioctl`
-- `pipe2`
-- `dup`
-- `dup3`
-
-在 x86_64 平台上，还需要较早支持 `arch_prctl`，否则线程本地存储和运行时初始化会卡住。
-
-### 6.3 进程模型兼容
-
-Linux 程序通常依赖如下语义：
-
-- `fork + exec`
-- `clone` 创建线程
-- 线程组
-- PID 与 TID 区分
-- 父子进程回收
-- 会话与进程组
-
-因此 Kairo 的任务模型不能只停留在“轻量线程切换”层面，必须从一开始就给进程和线程留下清晰抽象边界。
-
-### 6.4 信号机制兼容
-
-信号是 Linux 兼容中最容易被低估的部分之一。建议至少支持：
-
-- `SIGINT`
-- `SIGTERM`
-- `SIGCHLD`
-- `SIGSEGV`
-- `SIGKILL`
-- `SIGSTOP`
-
-需要实现的语义包括：
-
-- 信号处理器注册
-- 信号屏蔽字
-- 挂起信号队列
-- 返回用户态时的信号投递
-- 信号帧构造与恢复
-
-### 6.5 伪文件系统兼容
-
-许多 Linux 程序不仅依赖 syscall，也会访问约定路径。系统应逐步实现：
-
-- `/proc/self`
-- `/proc/self/maps`
-- `/proc/meminfo`
-- `/proc/cpuinfo`
-- `/dev/null`
-- `/dev/zero`
-- `/dev/random`
-- `/dev/urandom`
-- `/dev/tty`
-- `/tmp`
-
-这些接口对 shell、运行时、调试器和基础工具都非常重要。
-
-## 7. C 运行时与 libc 兼容策略
-
-这是项目成败的关键之一。
-
-建议采用以下路线：
-
-### 7.1 第一阶段：优先支持 musl 静态程序
-
-这是最现实的起点，因为：
-
-- 依赖更少
-- 不需要先完整实现动态链接器
-- 行为更容易调试
-
-目标程序可以优先选择：
-
-- `busybox` 静态版
-- 自定义 hello world
-- 简单工具程序
-
-### 7.2 第二阶段：支持 musl 动态程序
-
-在此阶段需要补齐：
-
-- 共享库映射
-- 动态链接初始化
-- TLS 基础
-- 更完整的内存映射行为
-
-### 7.3 第三阶段：逐步兼容 glibc
-
-`glibc` 兼容难度明显更高，主要痛点包括：
-
-- 线程本地存储
-- 更严格的 `futex` 语义
-- 信号细节
-- `/proc` 依赖
-- `vDSO`
-- `pthread` 行为细节
-
-因此项目必须明确：`glibc` 是中后期目标，不应在系统尚未稳定时强行推进。
-
-## 8. 用户态系统设计
-
-### 8.1 init 进程
-
-第一个用户态进程负责：
-
-- 挂载伪文件系统
-- 初始化基础设备节点
-- 启动 shell 或服务管理器
-- 管理系统关闭与故障恢复
-
-早期不必做完整 service manager，一个简化版 `init` 即可。
-
-### 8.2 用户态基础组件
-
-建议包含：
-
-- ELF 加载支持组件
-- 动态链接兼容组件
-- 基础 shell
-- 调试与日志工具
-
-### 8.3 文件系统布局
-
-建议从一开始就接近 Linux 目录结构：
-
-```text
-/
-├── bin
-├── sbin
-├── lib
-├── lib64
-├── usr
-│   ├── bin
-│   ├── lib
-│   └── share
-├── etc
-├── proc
-├── dev
-├── tmp
-├── var
-└── home
-```
-
-这样更方便移植已有用户态工具，也能减少后续目录兼容的额外成本。
-
-## 9. 安全设计
-
-Rust 可以显著降低内存安全漏洞，但不能替代系统级安全设计。Kairo 需要在架构层面落实以下原则：
-
-- 用户态和内核态严格隔离
-- syscall 参数必须完整校验
-- 驱动访问边界清晰
-- 权限与身份模型明确
-- 核心对象使用能力边界或访问控制机制
-
-中后期可以逐步扩展：
-
-- capability 机制
-- seccomp 风格过滤
-- 可执行文件签名
-- 审计日志
-
-## 10. 推荐开发阶段
-
-### Phase 1：最小可启动内核
-
-目标：
-
-- UEFI 启动
-- 页表初始化
-- 异常和中断框架
-- 串口日志
-- 基础内存分配
-- 进入第一个用户态程序
-
-验收标准：
-
-- 能在 QEMU 中稳定启动
-- 能输出启动日志
-- 能运行最小静态程序
-
-### Phase 2：基础进程与文件系统
-
-目标：
-
-- 进程和线程基础抽象
-- `execve`
-- 基础 VFS
-- `tmpfs`
-- `/dev/null` 和 `/dev/zero`
-- `read/write/openat/close`
-
-验收标准：
-
-- 可运行静态版 BusyBox
-- 可执行简单文件读写操作
-
-### Phase 3：Linux ABI 初步兼容
-
-目标：
-
-- `mmap/brk`
-- `stat/getdents64`
-- `clone`
-- `futex`
-- 信号机制基础
-- `/proc` 最小实现
-
-验收标准：
-
-- 可运行 shell
-- `ls`、`cat`、`echo` 等命令可正常工作
-
-### Phase 4：网络与事件模型
-
-目标：
-
-- TCP/IP 栈
-- socket API
-- `poll/select/epoll`
-- `ioctl` 的常见路径支持
-
-验收标准：
-
-- 可运行简单客户端程序
-- 可启动基础网络服务
-
-### Phase 5：动态链接与 glibc 兼容增强
-
-目标：
-
-- 更完整 TLS
-- 更准确 futex 语义
-- `vDSO`
-- 更完整 `/proc`
-- `glibc` 适配修正
-
-验收标准：
-
-- 可运行更多复杂 Linux 用户态程序
-
-## 11. 当前仓库建议结构
-
-结合当前仓库中已有的 [`kairo-kernel`](/Users/hjr/Desktop/Kairo/kairo-kernel) 和 [`xtask`](/Users/hjr/Desktop/Kairo/xtask)，推荐逐步演进为如下结构：
-
-```text
-Kairo/
-├── README.md
-├── kairo-kernel/
-│   ├── src/
-│   │   ├── arch/
-│   │   ├── boot/
-│   │   ├── mm/
-│   │   ├── sched/
-│   │   ├── syscall/
-│   │   ├── fs/
-│   │   ├── driver/
-│   │   └── user/
-│   ├── Cargo.toml
-│   └── x86_64-kairo.json
-├── userland/
-│   ├── init/
-│   ├── loader/
-│   └── ports/
-├── docs/
-│   ├── architecture.md
-│   ├── abi-compat.md
-│   └── roadmap.md
-└── xtask/
-```
-
-早期不必一次性建立全部目录，但建议尽早按模块边界拆分，避免后续在单文件或单模块中堆积过多职责。
-
-## 12. 当前代码与后续工作的关系
-
-现有 [`kairo-kernel/src/main.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/main.rs)、[`kairo-kernel/src/serial.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/serial.rs) 和 [`kairo-kernel/src/vga_buffer.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/vga_buffer.rs) 更接近“最小内核启动原型”阶段。
-
-这很好，因为它对应了本设计中的 Phase 1。后续工作建议按以下顺序展开：
-
-1. 把启动、输出、配置相关逻辑从当前入口中拆成更清晰的模块。
-2. 引入基础内存管理抽象，为用户态装载做准备。
-3. 建立任务模型和 syscall 框架。
-4. 再推进 ELF 加载和最小用户程序执行。
-
-## 13. 最大技术风险
-
-项目最难的部分不在“把内核跑起来”，而在 Linux 兼容行为的细节一致性。需要特别警惕以下风险：
-
-- 低估 `glibc` 兼容成本
-- 低估 `clone + futex + signal` 的耦合复杂度
-- 低估 `/proc` 和 `ioctl` 的生态依赖
-- 过早引入过多硬件支持导致调试面过大
-
-因此项目管理上应坚持一个原则：
-
-先在 QEMU + virtio + musl 静态程序闭环下做稳定，再逐步扩大兼容面。
-
-## 14. 总结
-
-Kairo 的推荐路线可以概括为：
-
-Rust 混合内核、优先支持虚拟化平台、以 Linux 用户态 ABI 兼容为主线、先支持 musl 静态程序，再逐步迈向动态链接和更强兼容能力。
-
-这条路线兼顾了工程可行性、技术挑战性和长期演进空间，适合作为一个严肃的 Rust 操作系统项目基础。
-
-## 15. 下一步建议
-
-在本文档基础上，后续建议优先补充三类文档：
-
-1. 架构分层文档，明确内核模块边界与接口。
-2. Linux ABI 兼容清单，跟踪 syscall 和行为支持状态。
-3. 启动与运行指南，统一 QEMU 调试流程。
-
-如果继续推进，我下一步可以直接补：
-
-- 一份更细的 [`docs/architecture.md`](/Users/hjr/Desktop/Kairo/docs/architecture.md)，把内核模块接口详细展开。
-- 一份 [`docs/roadmap.md`](/Users/hjr/Desktop/Kairo/docs/roadmap.md)，按里程碑拆成具体开发任务。
-- 一份面向当前代码的重构方案，把 [`kairo-kernel`](/Users/hjr/Desktop/Kairo/kairo-kernel) 先整理成更适合扩展的骨架。
+- 不以 ELF / syscall / BusyBox 兼容作为近期目标
+- 不让传统进程、线程、文件描述符模型反向定义底层对象
+- 不在 roadmap 中为 Linux 兼容保留主路线位置
+
+如果未来确实需要桥接传统生态，也只能作为附属能力接入，而不是牵引系统主方向。
+
+## 8. 当前仓库状态
+
+当前代码仍然停留在最小启动原型阶段，主要集中在：
+
+- [`kairo-kernel/src/main.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/main.rs)
+- [`kairo-kernel/src/serial.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/serial.rs)
+- [`kairo-kernel/src/vga_buffer.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/vga_buffer.rs)
+- [`kairo-kernel/src/boot_config.rs`](/Users/hjr/Desktop/Kairo/kairo-kernel/src/boot_config.rs)
+- [`xtask/src/main.rs`](/Users/hjr/Desktop/Kairo/xtask/src/main.rs)
+
+## 9. 文档地图
+
+当前文档应按以下顺序阅读：
+
+1. [README.md](/Users/hjr/Desktop/Kairo/README.md)
+2. [docs/architecture.md](/Users/hjr/Desktop/Kairo/docs/architecture.md)
+3. [docs/object-model.md](/Users/hjr/Desktop/Kairo/docs/object-model.md)
+4. [docs/domains.md](/Users/hjr/Desktop/Kairo/docs/domains.md)
+5. [docs/platform-realizations.md](/Users/hjr/Desktop/Kairo/docs/platform-realizations.md)
+6. [docs/model-substrate.md](/Users/hjr/Desktop/Kairo/docs/model-substrate.md)
+7. [docs/dual-execution.md](/Users/hjr/Desktop/Kairo/docs/dual-execution.md)
+8. [docs/parametric-execution.md](/Users/hjr/Desktop/Kairo/docs/parametric-execution.md)
+9. [docs/wasm-domain.md](/Users/hjr/Desktop/Kairo/docs/wasm-domain.md)
+10. [docs/wasm-kernel-boundary.md](/Users/hjr/Desktop/Kairo/docs/wasm-kernel-boundary.md)
+11. [docs/agent-environment.md](/Users/hjr/Desktop/Kairo/docs/agent-environment.md)
+12. [docs/roadmap.md](/Users/hjr/Desktop/Kairo/docs/roadmap.md)
+
+## 10. 当前定调结论
+
+Kairo 后续不应再沿着“传统 OS + Linux 兼容 + 跑几个程序”的路线推进，而应统一坚持以下定调：
+
+- Kairo 是 agent-native system platform
+- 模型执行是系统一等能力
+- 模型内生 agent 行为是顶层目标
+- 双层执行是核心运行机制
+- Wasm 是关键执行格式，而不是单一用途组件
+- 平台实现必须兼容 CPU、GPU 和 hybrid
+- 不为传统 Linux 兼容保留目标地位
